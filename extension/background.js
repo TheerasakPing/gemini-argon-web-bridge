@@ -213,10 +213,11 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
 });
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'argon-poll') { void poll(); void stream(); } });
 chrome.tabs.onUpdated.addListener((id,info,tab) => {
-  // Gemini moves a fresh /app chat to /app/<id> after submit, which also reports 'loading'.
-  // Only leaving gemini.google.com invalidates here; real reloads are caught by poll() via documentId.
-  if (info.status === 'loading' && info.url && !info.url.startsWith('https://gemini.google.com/'))
-    void invalidateActive('Gemini tab navigated away during job; result discarded', undefined, id);
+  // Gemini moves a fresh /app chat to /app/<id> after submit, and that URL change also reports 'loading'.
+  // A Gemini URL change is that promotion, so it must not cancel the job. Reloads and navigation away
+  // from Gemini still invalidate here.
+  if (info.status === 'loading' && !(info.url && info.url.startsWith('https://gemini.google.com/')))
+    void invalidateActive('Gemini page navigated or reloaded during job; result discarded', undefined, id);
   if (info.status === 'complete' && tab.url?.startsWith('https://gemini.google.com/')) void poll();
 });
 chrome.tabs.onRemoved.addListener(id => {
