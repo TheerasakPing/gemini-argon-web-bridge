@@ -27,6 +27,7 @@ def main():
     parser.add_argument('--count', type=int, default=10, choices=range(1, 11))
     parser.add_argument('--start-case', type=int, default=1)
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--keep-going', action='store_true', help='continue after a failed case')
     args = parser.parse_args()
     output = args.output or Path(tempfile.mkdtemp(prefix='argon-live-acceptance-'))
     output.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -166,7 +167,7 @@ def main():
         results.append(result)
         (output / 'report.json').write_text(json.dumps(results, ensure_ascii=False, indent=2))
         print(json.dumps(result, ensure_ascii=False), flush=True)
-        if not passed:
+        if not passed and not args.keep_going:
             print(json.dumps({'blocked': 'Failed run requires inspection before another submission',
                               'completed': len(results)}, ensure_ascii=False), flush=True)
             break

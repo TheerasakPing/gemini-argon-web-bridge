@@ -142,6 +142,7 @@ Reply in the user's language. Put user-facing progress/answers BEFORE the envelo
 For final, write the complete answer as normal prose before the envelope, and copy it into final.text.
 Inside the envelope all strings must be valid JSON: escape double quotes as \" and newlines as \n.
 Never put raw multiline text inside a JSON string. final.text is a JSON string too.
+Never use LaTeX, math notation or equations in answers; write plain text such as 79 - 5 = 74.
 Gemini's web page strips markdown asterisks, so inside the envelope write every * as \u002a (valid JSON escape).
 End with exactly one envelope; no text after it:
 {BEGIN}
