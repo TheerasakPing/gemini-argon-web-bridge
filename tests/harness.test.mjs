@@ -64,7 +64,7 @@ sys.exit(child.wait())
     child.stderr.on('data',chunk=>err+=chunk);
     const ended=new Promise((res,rej)=>{child.on('error',rej);child.on('close',code=>res({code,out,err,received}));});
     t.after(()=>child.kill('SIGKILL'));
-    return {child,ended};
+    return {child,ended,received};
   };
   return {dir,install,workspace,state,api,poll,launch};
 }
@@ -73,6 +73,7 @@ test('Rust agent: real bridge multi-turn read, streaming, final, session fork', 
   const f=await setup(t);
   const run=f.launch(['agent','Understand this project','--json']);
   let finalPostedAt=0;
+  const streamedJobs=[];
   for(let i=0;i<2;i++){
     let task;
     for(let tries=0;tries<200;tries++){
@@ -86,7 +87,23 @@ test('Rust agent: real bridge multi-turn read, streaming, final, session fork', 
     assert.ok(nonce);
     if(i===1)assert.match(task.prompt,/A tiny project/);
     const action=i===0?{type:'read_file',path:'README.md',start_line:1,end_line:50}:{type:'final',text:'Project overview: README.md:1; app.py is entrypoint.'};
-    const response='กำลังตรวจโปรเจค\n<<<ARGON_ACTION>>>\n'+JSON.stringify({version:1,nonce,id:`call_${i}`,action})+'\n<<<END_ARGON_ACTION>>>';
+    const response='กำลังตรวจโปรเจค\nเสร็จแล้ว\n<<<ARGON_ACTION>>>\n'+JSON.stringify({version:1,nonce,id:`call_${i}`,action})+'\n<<<END_ARGON_ACTION>>>';
+    streamedJobs.push(task.id);
+    for(const [count,partial] of [[1,'กำลัง'],[2,'กำลังตรวจ']]){
+      await f.api(`/jobs/${task.id}/progress`,{claimToken:task.claimToken,phase:'generating',partial});
+      let partialEvents=[];
+      for(let tries=0;tries<200;tries++){
+        partialEvents=run.received.map(chunk=>chunk.text).join('').trim().split('\n')
+          .flatMap(line=>{try{return [JSON.parse(line)];}catch{return [];}});
+        if(partialEvents.filter(e=>e.event==='assistant_delta'&&e.data.job_id===task.id&&
+          e.data.job_status==='running'&&e.data.job_phase==='generating').length>=count)break;
+        await delay(20);
+      }
+      assert.ok(partialEvents.filter(e=>e.event==='assistant_delta'&&e.data.job_id===task.id&&
+        e.data.job_status==='running'&&e.data.job_phase==='generating').length>=count,
+        'partial arrives while the same job is still generating');
+      await delay(120);
+    }
     await f.api(`/jobs/${task.id}/progress`,{claimToken:task.claimToken,phase:'generating',partial:'กำลังตรวจโปรเจค\n<<<ARGO'});
     await delay(250);
     finalPostedAt=Date.now();
@@ -99,6 +116,14 @@ test('Rust agent: real bridge multi-turn read, streaming, final, session fork', 
   assert.ok(events.some(e=>e.event==='final'));
   assert.ok(result.received.some(r=>r.at<finalPostedAt&&r.text.includes('assistant_delta')));
   assert.ok(!events.filter(e=>e.event==='assistant_delta').some(e=>e.data.text.includes('<<<')));
+  for(const job of streamedJobs){
+    const partials=events.filter(e=>e.event==='assistant_delta'&&e.data.job_id===job&&
+      e.data.job_status==='running'&&e.data.job_phase==='generating');
+    assert.ok(partials.length>=2);
+    assert.ok(partials.at(-1).at_ms-partials[0].at_ms>=100);
+    assert.ok(events.some(e=>e.event==='assistant_delta'&&e.data.job_id===job&&e.data.job_status==='done'),
+      'text first received from completed response is labelled done');
+  }
   const id=readdirSync(f.state)[0];
   const saved=JSON.parse(readFileSync(join(f.state,id,'state.json')));
   assert.equal(saved.status,'final');assert.equal(saved.pending,null);
@@ -170,12 +195,15 @@ test('Rust agent: pending model intent is not replayed on resume', {skip},async 
 
 test('Rust agent: approved read/edit/test/final loop preserves actual test result', {skip:skip || process.platform==='win32'},async t=>{
   const f=await setup(t);
-  const run=f.launch(['agent','Change hello to welcome and test it','--allow-edit','--allow-commands'],true);
+  const run=f.launch(['agent','Change hello to welcome and test it','--allow-edit','--allow-commands',
+    ...(process.platform==='darwin'?[]:['--no-sandbox'])],true);
   const hash=createHash('sha256').update('print("hello")\n').digest('hex');
   const actions=[
     {type:'read_file',path:'app.py',start_line:1,end_line:30},
     {type:'edit_file',path:'app.py',sha256:hash,old_text:'hello',new_text:'welcome'},
-    {type:'run_command',argv:['python3','-I','-c','from pathlib import Path; assert "welcome" in Path("app.py").read_text(); print("TEST_OK")'],timeout_s:3},
+    {type:'run_command',argv:process.platform==='darwin'
+      ?['/bin/sh','-c','/usr/bin/grep -q welcome app.py && printf "TEST_OK\\n"']
+      :['python3','-I','-c','from pathlib import Path; assert "welcome" in Path("app.py").read_text(); print("TEST_OK")'],timeout_s:3},
     {type:'final',text:'Changed app.py; approved test exited 0 and printed TEST_OK.'},
   ];
   for(let index=0;index<actions.length;index++){
@@ -193,5 +221,6 @@ test('Rust agent: approved read/edit/test/final loop preserves actual test resul
   const state=JSON.parse(readFileSync(join(f.state,readdirSync(f.state)[0],'state.json')));
   assert.equal(state.calls.step_2.result.data.exit_code,0);
   assert.equal(state.calls.step_2.result.data.stdout.trim(),'TEST_OK');
+  assert.equal(state.command_sandbox,process.platform==='darwin');
   assert.equal(state.status,'final');
 });

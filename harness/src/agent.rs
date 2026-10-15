@@ -2,6 +2,7 @@ use crate::{
     command,
     protocol::{self, Action, Envelope},
     provider::Bridge,
+    recovery,
     session::Session,
     workspace::{digest, Workspace},
 };
@@ -102,6 +103,23 @@ fn approve(
         json!({"action":value,"sha256":hash}),
         json_mode,
     )?;
+    let workspace = Workspace::new(&session.state.root)?;
+    let preview = match action {
+        Action::EditFile {
+            path,
+            sha256,
+            old_text,
+            new_text,
+        } => Some(workspace.preview_edit(path, sha256, old_text, new_text)?),
+        Action::CreateFile { path, content } => Some(workspace.preview_create(path, content)?),
+        _ => None,
+    };
+    if let Some(diff) = preview {
+        emit(session, "edit_preview", json!({"diff":diff}), json_mode)?;
+        if !json_mode {
+            eprintln!("{}", terminal_text(&diff));
+        }
+    }
     // Noninteractive use must never turn a model request into implicit approval.
     if json_mode || !io::stdin().is_terminal() {
         return Ok(false);
@@ -176,66 +194,71 @@ pub fn run(
             started.elapsed() < Duration::from_secs(limits.seconds),
             "Session time budget reached"
         );
-        let nonce = Uuid::new_v4().to_string();
-        let prompt = format!(
-            "{}\nTASK:\n{}\nPROJECT FILES (partial):\n{}\nEVIDENCE AND PRIOR ACTIONS:\n{}",
-            protocol::instructions(&nonce, session.state.editable, session.state.commands),
-            session.state.task,
-            workspace
-                .files()
-                .into_iter()
-                .take(160)
-                .collect::<Vec<_>>()
-                .join("\n"),
-            serde_json::to_string(&session.state.transcript)?
-        );
-        if prompt.len() > 85_000 {
-            session.state.status = "budget".into();
-            session.save()?;
-            emit(
-                session,
-                "limit",
-                json!({"message":"Context budget reached; session saved without silently dropping evidence"}),
-                limits.json,
-            )?;
-            anyhow::bail!("Context budget reached; resume requires reducing the task or starting a focused fork");
-        }
-        // Persist before POST: even an HTTP failure can mean the remote accepted the request.
-        session.state.pending = Some(json!({"kind":"model_submit","nonce":nonce}));
-        session.state.status = "waiting_model".into();
-        session.save()?;
-        let job = bridge.submit(&prompt)?;
-        session.state.pending = Some(json!({"kind":"model_job","job":job,"nonce":nonce}));
-        session.save()?;
         let mut visible = String::new();
-        let remaining = Duration::from_secs(limits.seconds).saturating_sub(started.elapsed());
-        let answer = bridge.wait(&job, remaining, cancelled, &mut |snapshot| {
-            let prefix = protocol::visible_prefix(snapshot);
-            if prefix.starts_with(&visible) {
-                let delta = &prefix[visible.len()..];
-                if !delta.is_empty() {
+        let (nonce, answer) = if let Some(saved) = recovery::saved_response(session)? {
+            saved
+        } else {
+            let nonce = Uuid::new_v4().to_string();
+            let prompt = format!(
+                "{}\nTASK:\n{}\nPROJECT FILES (partial):\n{}\nEVIDENCE AND PRIOR ACTIONS:\n{}",
+                protocol::instructions(&nonce, session.state.editable, session.state.commands),
+                session.state.task,
+                workspace
+                    .files()
+                    .into_iter()
+                    .take(160)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                serde_json::to_string(&session.state.transcript)?
+            );
+            if prompt.len() > 85_000 {
+                session.state.status = "budget".into();
+                session.save()?;
+                emit(
+                    session,
+                    "limit",
+                    json!({"message":"Context budget reached; session saved without silently dropping evidence"}),
+                    limits.json,
+                )?;
+                anyhow::bail!("Context budget reached; resume requires reducing the task or starting a focused fork");
+            }
+            // Persist before POST: even an HTTP failure can mean the remote accepted the request.
+            session.state.pending = Some(json!({"kind":"model_submit","nonce":nonce}));
+            session.state.status = "waiting_model".into();
+            session.save()?;
+            let job = bridge.submit(&prompt)?;
+            session.state.pending = Some(json!({"kind":"model_job","job":job,"nonce":nonce}));
+            session.save()?;
+            let remaining = Duration::from_secs(limits.seconds).saturating_sub(started.elapsed());
+            let answer = bridge.wait(&job, remaining, cancelled, &mut |snapshot, status, phase| {
+                let prefix = protocol::visible_prefix(snapshot);
+                if prefix.starts_with(&visible) {
+                    let delta = &prefix[visible.len()..];
+                    if !delta.is_empty() {
+                        emit(
+                            session,
+                            "assistant_delta",
+                            json!({"text":delta,"job_id":job,"job_status":status,"job_phase":phase}),
+                            limits.json,
+                        )?;
+                    }
+                } else if prefix != visible {
                     emit(
                         session,
-                        "assistant_delta",
-                        json!({"text":delta}),
+                        "assistant_reset",
+                        json!({"text":prefix,"job_id":job,"job_status":status,"job_phase":phase}),
                         limits.json,
                     )?;
                 }
-            } else if prefix != visible {
-                emit(
-                    session,
-                    "assistant_reset",
-                    json!({"text":prefix}),
-                    limits.json,
-                )?;
-            }
-            visible = prefix.into();
-            Ok(())
-        })?;
-        session.state.pending = None;
-        session.state.turns += 1;
-        session.state.status = "ready".into();
-        session.save()?;
+                visible = prefix.into();
+                Ok(())
+            })?;
+            session.state.pending =
+                Some(json!({"kind":"model_answer","job":job,"nonce":nonce,"answer":answer}));
+            session.state.status = "response_saved".into();
+            session.save()?;
+            (nonce, answer)
+        };
         let envelope = match protocol::parse(&answer, &nonce) {
             Ok(a) => a,
             Err(error) => {
@@ -253,6 +276,8 @@ pub fn run(
                 );
                 session.state.transcript.push(json!({"kind":"protocol_error","error":diagnostic,
                     "instruction":"Return exactly one valid envelope using the nonce in the next request; no tool was executed"}));
+                session.state.pending = None;
+                session.state.turns += 1;
                 session.save()?;
                 emit(
                     session,
@@ -265,6 +290,8 @@ pub fn run(
         };
         let Envelope { id, action, .. } = envelope;
         if let Action::Final { text } = &action {
+            session.state.pending = None;
+            session.state.turns += 1;
             session.state.status = "final".into();
             session
                 .state
@@ -289,6 +316,8 @@ pub fn run(
                 .state
                 .transcript
                 .push(json!({"kind":"cached_tool_result","id":id,"result":saved["result"]}));
+            session.state.pending = None;
+            session.state.turns += 1;
             session.save()?;
             continue;
         }
@@ -349,7 +378,7 @@ pub fn run(
                 started.elapsed() < Duration::from_secs(limits.seconds),
                 "Session time budget reached"
             );
-            session.state.pending = Some(json!({"kind":"tool","id":id,"action":serialized}));
+            session.state.pending = Some(recovery::tool_intent(&id, &action, &workspace)?);
             session.state.status = "running_tool".into();
             session.save()?;
             result = match &action {
@@ -361,13 +390,18 @@ pub fn run(
                     end_line,
                 } => workspace.read_lines(path, *start_line, *end_line),
                 Action::SearchText { query } => workspace.search(query),
+                Action::GitDiff { path } => workspace.git_diff(path),
                 Action::EditFile {
                     path,
                     sha256,
                     old_text,
                     new_text,
                 } => workspace.edit(path, sha256, old_text, new_text),
-                Action::RunCommand { argv, timeout_s } => command::run(
+                Action::RunCommand { argv, timeout_s } => (if session.state.command_sandbox {
+                    command::run_sandboxed
+                } else {
+                    command::run
+                })(
                     &workspace.root,
                     argv,
                     (*timeout_s)
@@ -402,6 +436,7 @@ pub fn run(
             .transcript
             .push(json!({"kind":"tool_result","id":id,"action":serialized,"result":observation}));
         session.state.pending = None;
+        session.state.turns += 1;
         session.state.status = "ready".into();
         session.save()?;
         emit(session, "tool_result", observation, limits.json)?;

@@ -12,6 +12,20 @@ spec.loader.exec_module(bridge)
 
 
 class HarnessDispatchTests(unittest.TestCase):
+    def test_recover_inspection_routes_without_starting_server(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / 'bin' / ('argon-harness.exe' if os.name == 'nt' else 'argon-harness')
+            binary.parent.mkdir()
+            binary.write_bytes(b'fixture')
+            with patch.object(bridge, 'ROOT', root), \
+                    patch.object(bridge.sys, 'argv', ['argon', 'recover', 'session-id', '--json']), \
+                    patch.object(bridge, 'ensure_server') as start, \
+                    patch.object(bridge.subprocess, 'call', return_value=0) as call:
+                self.assertEqual(bridge.main(), 0)
+                start.assert_not_called()
+                self.assertEqual(call.call_args.args[0], [str(binary), 'recover', 'session-id', '--json'])
+
     def test_dispatch_preserves_arguments_and_install_root(self):
         with tempfile.TemporaryDirectory(prefix='argon binary ') as directory:
             root = Path(directory)

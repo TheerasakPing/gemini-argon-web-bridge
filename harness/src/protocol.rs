@@ -34,6 +34,9 @@ pub enum Action {
     SearchText {
         query: String,
     },
+    GitDiff {
+        path: String,
+    },
     EditFile {
         path: String,
         sha256: String,
@@ -72,6 +75,7 @@ impl Action {
             Self::ListFiles { .. } => "list_files",
             Self::ReadFile { .. } => "read_file",
             Self::SearchText { .. } => "search_text",
+            Self::GitDiff { .. } => "git_diff",
             Self::EditFile { .. } => "edit_file",
             Self::RunCommand { .. } => "run_command",
             Self::Final { .. } => "final",
@@ -146,6 +150,7 @@ Choose ONE action:
 list_files: path (relative directory, default empty).
 read_file: path, start_line, end_line (at most 200 lines). Returns whole-file sha256.
 search_text: query (literal text).
+git_diff: path (one existing indexed text file tracked in HEAD; compares HEAD to working copy).
 {edit}
 {command}
 final: text (complete answer with file references, actual test results and remaining uncertainties).

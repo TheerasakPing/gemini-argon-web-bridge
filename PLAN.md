@@ -44,7 +44,7 @@ argon resume SESSION_ID
 | --- | --- | --- |
 | Python CLI | daemon lifecycle, streaming, auto context | command routing ไป Rust; loop/tools/sessions อยู่ใน Rust |
 | Node bridge | authenticated jobs, queue, progress, history | session ownership, tab lease, job reconciliation |
-| Extension | auto injection, compose/submit, response extraction | รุ่นแรกไม่แก้ extension; conversation identity validation อยู่ roadmap |
+| Extension | auto injection, compose/submit, response extraction | เพิ่ม document/composer/conversation identity validation ในรุ่นทดลองแล้ว; รอ live verification |
 | Installer | symlink install, token preservation, launchers | copy package harness ใหม่และ smoke tests |
 | Tests | bridge, extension, streaming, installation | protocol, file boundaries, recovery และ task fixtures |
 
@@ -134,7 +134,9 @@ Gemini API มี function calling โดยให้ application execute functi
 - การอ่าน source เป็น automatic ได้; patch และ command แสดง scope ให้ผู้ใช้อนุมัติใน terminal
 - approval ผูกกับ arguments และ hash ของเนื้อหาจริง ไม่ใช่ข้อความสรุปจากโมเดล
 - ไม่มี built-in delete/deploy/push/migration tools; command ที่ผู้ใช้อนุมัติยังทำสิ่งเหล่านี้ได้
-- ไม่ใช้ `shell=True`; argv ไม่ใช่ sandbox และโปรแกรมที่รันยังอ่านเครื่อง/ใช้ network ได้
+- ไม่ใช้ `shell=True`; argv แยกจาก OS isolation
+  เมื่อเปิด commands ใช้ macOS sandbox เป็นค่าเริ่มต้น ปิด network และจำกัดข้อมูลใน workspace
+  พร้อม system runtime prefixes; `--no-sandbox` ต้องเลือกเองและหมายถึงใช้สิทธิ์บัญชีผู้ใช้
 - project tests, build scripts และ package hooks เป็น executable code ต้องได้รับ approval
 - ไม่ติดตั้ง dependencies เองโดยไม่แสดงคำสั่งและขออนุมัติ
 - session approval อนุญาตได้เฉพาะ scope แคบที่ผู้ใช้เลือก ไม่ยกระดับโดยโมเดล
@@ -147,12 +149,14 @@ Gemini API มี function calling โดยให้ application execute functi
 - bridge ออก lease token ให้ session ที่ครอบครองแท็บ; ทุก agent job ต้องมี lease ที่ตรงกัน
 - ตรวจ lease ที่ bridge ก่อนส่ง เพื่อป้องกัน CLI/API อื่นแทรก; extension ใช้ flow เดิม
 - heartbeat ต่ออายุ lease; lease หมดระหว่างมีงาน uncertain ต้อง reconcile ก่อนส่งใหม่
-- extension ปฏิเสธ draft/busy และการส่งล้มเหลวคืน error; ยังไม่มี conversation identity monitor
+- extension ปฏิเสธ draft/busy และตรวจ document/composer/conversation;
+  เปลี่ยนหน้า/reload/ปิดแท็บระหว่างงานจะ invalidate ผลลัพธ์
 - session ที่มี tab lease ไม่รับ `--force` เพื่อทับ draft โดยอัตโนมัติ
 - บันทึก intent ก่อนใช้ tool และบันทึกผลหลังสำเร็จ; journal flush ก่อนทำผลข้างเคียง
 - states สำคัญ: ready, waiting_model, running_tool, uncertain, failed, budget, final; approval เป็น event
 - timeout หลังส่ง prompt ถือเป็น uncertain; ห้ามส่ง prompt ซ้ำโดยเดา
-- resume ปฏิเสธ pending intent; ยังไม่มี automated reconciliation และไม่ replay งานที่ไม่รู้ผล
+- resume ปฏิเสธ pending ที่ยังไม่ทราบผล; `recover --reconcile` ยืนยัน job หรือ file hash
+  แล้วเก็บหลักฐานโดยไม่ replay งาน และ resume ใช้ model answer ที่บันทึกแล้วได้
 - ถ้า bridge สูญเสีย job หลัง restart ให้หยุดรอตรวจ conversation
 - command ที่อาจรันไปแล้วและไม่รู้ผล ห้าม replay; patch ตรวจ preimage/postimage hashes
 - resume คง editable/commands ของ session แต่ทุก mutation ต้องขอ exact-action approval ใหม่; fork กลับ read-only
@@ -256,9 +260,11 @@ parser/provider/read loop และ opt-in editing/commands ทำแล้ว�
    สิทธิ์ read-only ถูกตรวจทั้ง prompt/tool schemas และ executor
 3. **Durable at-most-once intent:** sync journal ก่อนส่ง prompt/ทำ write/รัน process
    การ crash ที่มี pending intent ให้ resume หยุดเป็น uncertain ไม่ replay
-   รุ่นแรกยังไม่มี automated reconciliation ของ uncertain job
+   `recover --reconcile` ใช้ job status และ preimage/postimage hashes;
+   command ที่ไม่ทราบผลต้องตรวจเองและยืนยัน abandon
 4. **Approval ≠ sandbox:** read tools จำกัด root/ignore/secrets; command tool ใช้ argv และ clean environment
-   แต่ process ที่อนุมัติอาจอ่านนอก root หรือใช้ network ได้
+   เมื่อเปิด command ใช้ macOS sandbox เป็นค่าเริ่มต้น; เฉพาะ `--no-sandbox`
+   จึงใช้สิทธิ์บัญชีผู้ใช้เพื่ออ่านนอก root หรือใช้ network ได้
    ค่า default ไม่เปิด command tool; headless execution ไม่ auto-approve
 5. **No destructive rollback:** checkpoint เก็บ hashes และ journal ไม่ใช้ git reset/checkout
    fork สร้าง session ใหม่พร้อม evidence เดิม ไม่อ้างว่า rollback filesystem
@@ -296,7 +302,40 @@ parser/provider/read loop และ opt-in editing/commands ทำแล้ว�
 - stdout/stderr ของ command แสดงหลังจบและตรวจ bounded buffer; assistant text ยังคง stream จากหน้าเว็บ
 - ทดสอบ local บน macOS/Rust 1.95; Windows runtime และ Rust 1.89 minimum ยังไม่ได้ทดสอบในเครื่องนี้
 
-**ยังไม่ผ่าน stable gate:** 10 live tasks, conversation identity monitoring, automated pending reconciliation,
-OS sandbox, `git_diff` tool และ unified diff renderer ยังไม่ส่งมอบ
-ข้อจำกัด filesystem เป็น path validation สำหรับ trusted workspace ไม่ใช่การป้องกัน hostile concurrent symlink swaps
-ตัวกรอง secrets เป็น best effort; command ที่อนุมัติทำงานด้วยสิทธิ์ผู้ใช้และอาจอ่านนอก workspace/ใช้ network
+**ยังไม่ผ่าน stable gate:** 10 live tasks และการยืนยัน behavior ของ ownership/recovery ใน Brave รุ่นที่ติดตั้งจริง
+ข้อจำกัด filesystem tools เป็น path validation สำหรับ trusted workspace ไม่ใช่การป้องกัน hostile concurrent symlink swaps
+ตัวกรอง secrets เป็น best effort; command ที่เลือก `--no-sandbox` ใช้สิทธิ์ผู้ใช้และอาจอ่านนอก workspace/ใช้ network
+
+### รอบทีมพัฒนาและทีมรีวิว 16 ตุลาคม 2026
+
+- Automated ล่าสุดผ่าน **98 กรณีไม่ซ้ำ**: Rust unit 20, Node 50, Python 28
+  (Rust integration wrapper รัน Node 6 กรณีเดิม จึงไม่นับซ้ำ);
+  fmt/clippy, shell syntax และ diff whitespace ผ่าน
+- เพิ่ม pending reconciliation จาก bridge job หรือ preimage/postimage โดยไม่ replay tool;
+  เก็บ model answer ลงดิสก์ก่อน parse และใช้ lease เดิมได้เฉพาะ token เจ้าของที่ renew สำเร็จ
+- เพิ่ม unified diff ก่อน edit/create และ `git_diff` สำหรับ existing tracked text file หนึ่งไฟล์
+- เพิ่ม macOS `sandbox-exec` พร้อมทดสอบจริง: เขียนใน workspace สำเร็จ,
+  อ่านนอก root/ผ่าน symlink, เขียนนอก root และ TCP localhost ถูกปฏิเสธ
+  อนุญาตอ่าน system runtime prefixes ตาม README; Linux/Windows ยังไม่รองรับ sandbox
+- Integration แบบ simulated extension พิสูจน์ approved read → edit → command test → final
+  โดยใช้ default sandbox บน macOS และ SIGKILL → reconcile → resume โดยไม่ส่ง model job ซ้ำ
+- Extension 1.1.4 ตรวจ document/composer/conversation ก่อนรับ partial/result
+  ทีมรีวิวพบ race ระหว่าง delayed success write กับ navigation invalidation; ทีมพัฒนาเพิ่ม serialization และ regression test
+- รีวิวเพิ่มพบ PATH-based Git execution และ continuous output ทำให้ timeout ตรวจช้า;
+  แก้ใช้ canonical system Git, deadline 5 วินาที และ bounded drain พร้อมตรวจ cancellation ระหว่างอ่าน
+  sandbox จำกัด signal ภายใน sandbox และทดสอบยืนยันว่าไม่ส่ง TERM ไป process ภายนอก
+- เพิ่ม `tests/live_harness.py` เป็น opt-in acceptance suite แบบ serial ใน disposable projects
+  สุ่ม entrypoint/operator/arguments และ CHECK_ID โดยไม่เฉลยคำตอบใน prompt
+  ตรวจ list → read อย่างน้อย 3 tools, intent/behavior/output, fixture ทุกไฟล์ไม่เปลี่ยน และไม่มี pending
+  ยืนยัน streaming ด้วยหลาย delta จาก job เดียวกันที่ยัง running/generating ห่างกันอย่างน้อย 100ms
+  แยกจาก delta ที่เพิ่งได้เมื่อ job done; มี fault tests ปฏิเสธ buffered deltas, semantic answer ผิด และ README ถูกแก้
+- Live รอบใหม่ยัง **ไม่ผ่าน**: งานแรกจบด้วย `Could not open a new Gemini chat; inspect the tab`;
+  งานถัดไปหยุดและยกเลิกเมื่อ extension รายงาน `tabs: []`
+  หลักฐาน `/tmp/argon-live-acceptance-20261016-round2/report.json` บนเครื่องทดสอบ
+  จึงคงสถานะ experimental และไม่อ้างว่า stable gate 9/10 ผ่านแล้ว
+- รอบรีวิวสุดท้าย: extension ownership, Rust isolation/recovery, Python และ acceptance reviewers
+  ไม่พบ blocker ค้างในขอบเขตโค้ดรุ่นทดลองหลังแก้ข้อค้นพบ
+- ติดตั้ง release binary และ source extension 1.1.4 ที่ `/Volumes/Data/dot-cache/argon` แล้ว
+  ตรวจ hash ตรงกับ source/build และ symlink เดิมยังถูกต้อง;
+  `argon --doctor` ยังเห็น extension ที่ Brave โหลดเป็น 1.1.3 จึงต้อง Reload และ refresh ก่อนรัน live รอบใหม่
+  สถานะ bridge ล่าสุด ready, queue 0, ไม่มี agent lease; หน้าเว็บเลือก Flash-Lite และ modelVerified ยัง false

@@ -201,33 +201,63 @@ argon sessions
 argon resume SESSION_ID
 argon fork SESSION_ID --task "ลองแนวทางอื่น"
 
+# ตรวจงานที่ process หยุดกลางทางโดยไม่ replay tool
+argon recover SESSION_ID
+argon recover SESSION_ID --reconcile
+# ยอมรับว่าผลงานที่ตรวจยืนยันไม่ได้ยังไม่ทราบผล
+argon recover SESSION_ID --abandon "abandon SESSION_ID"
+
 # events แบบ JSONL สำหรับเชื่อมเครื่องมือ (ไม่เปิด approval แบบอัตโนมัติ)
 argon agent --json --max-turns 10 "ตรวจโครงสร้างโปรเจค"
 ```
 
-- Tools: `list_files`, `read_file`, `search_text`, `edit_file`, `create_file`, `run_command`
+- Tools: `list_files`, `read_file`, `search_text`, `git_diff`, `edit_file`, `create_file`, `run_command`
 - Read/search ใช้ ignore rules, ข้าม hidden/sensitive/generated paths และไม่ตาม symlink
 - Edit ต้องอ่านไฟล์ก่อน ใช้ whole-file SHA-256 และ exact text anchor; create ไม่เขียนทับไฟล์เดิม
-- แสดง action/ข้อความที่จะแก้ให้อนุมัติตรงตาม arguments; ไม่ใช้ auto-approval จาก model
-- Command ใช้ argv, timeout และ process cleanup; โปรแกรมที่อนุมัติยังใช้สิทธิ์บัญชีผู้ใช้
+- แสดง unified diff ก่อนอนุมัติ edit/create และตรวจ SHA-256 ซ้ำก่อนเขียน
+- `git_diff` เปรียบเทียบ HEAD กับ working copy ของ tracked text file ที่ระบุหนึ่งไฟล์
+  ใช้ `/usr/bin/git` ที่เชื่อถือได้และ deadline 5 วินาที ไม่ค้น executable จาก PATH
+  ยังไม่รองรับ Windows, deleted/untracked files หรือ staged-only view
+- Command ใช้ argv, timeout และ process cleanup พร้อม macOS `sandbox-exec` เป็นค่าเริ่มต้น
+  เมื่อเปิด `--allow-commands`; จำกัดอ่าน/เขียนใน workspace และปิด network
+  อนุญาตอ่าน system runtime prefixes `/System`, `/usr`, `/bin`, `/sbin`, `/Library/Apple`
+  รวม `/private/var/db/dyld` และ filesystem metadata จึงไม่ใช่การแยกข้อมูลทุกไฟล์บนเครื่อง
+  แพลตฟอร์มที่ไม่รองรับจะหยุด; `--no-sandbox` เป็นการเลือกใช้สิทธิ์บัญชีผู้ใช้โดยชัดเจน
 - stdout/stderr ของ command แสดงหลังจบและตรวจ secret แบบ bounded buffer; ข้อความ Gemini ยัง stream ระหว่างตอบ
 - Session journal เก็บใต้ `~/.local/state/argon/sessions` หรือ `$XDG_STATE_HOME/argon/sessions`
 - ค่า default: 20 model turns, 900 วินาทีรวม, prompt budget 85KB; ถึง budget จะเก็บ session และหยุด
-- บันทึก intent ก่อนส่ง prompt/ใช้ tool; resume ที่มี pending intent จะปฏิเสธการ replay
+- บันทึก intent ก่อนส่ง prompt/ใช้ tool และเก็บ model answer ก่อน parse
+  `recover --reconcile` ตรวจ job หรือ file hash แล้วบันทึกเฉพาะผลที่ยืนยันได้ โดยไม่รัน tool ซ้ำ
+  command ที่หยุดกลางทางยังถือว่าไม่ทราบผล ต้องตรวจผลเองก่อนใช้ `--abandon`
+  การ abandon ไม่ยกเลิกงานภายนอก และ job เก่าที่ bridge ลบจากหน่วยความจำแล้วจะกู้คำตอบไม่ได้
 - ทุก model turn เปิด fresh chat พร้อม bounded evidence บนแท็บที่ lease ไว้
   ขณะถือ lease ordinary CLI/API จะส่งคำถามแทรกไม่ได้
 - Lease ต่ออายุระหว่างรอโมเดล มีอายุ 30 นาที; ถ้า process crash ให้ตรวจสถานะก่อนใช้ใหม่
   lease ที่หมดอายุจะคืนได้เมื่อ bridge ไม่มีงานค้าง
 - Streaming เป็นข้อความ progress ที่หน้าเว็บส่งมาจริง; control JSON ซ่อนจากหน้าปกติ
   final answer ที่อยู่ใน envelope จะแสดงหลังตรวจ protocol ผ่าน
-- ยังไม่มี OS sandbox, LSP/DAP, full-screen TUI, executable plugins, autonomous subagents,
+- ยังไม่มี sandbox สำหรับ Linux/Windows, LSP/DAP, full-screen TUI, executable plugins, autonomous subagents,
   interactive session tree หรือ automatic context compaction
 - รุ่นนี้เป็น experimental; automated fixtures และ live Brave verification ต้องรายงานแยกกัน
 
+ชุด live acceptance รันกับแท็บ Gemini ที่พร้อมใช้งานจริง ใช้ disposable projects 10 งานแบบ serial
+สุ่ม source แล้วตรวจข้อสรุปโดยไม่เฉลยคำตอบใน prompt ตรวจหลาย partial ขณะ job ยัง generating
+และหยุดเมื่อ bridge ไม่พร้อมหรือ acceptance ของงานไม่ผ่าน:
+
+```sh
+python3 tests/live_harness.py \
+  --binary /Volumes/Data/dot-cache/argon/bin/argon-harness \
+  --output /tmp/argon-live-acceptance
+```
+
+รายงานต้องมีอย่างน้อย 9/10 งานผ่านก่อนยกระดับ stable; `--count 1` ใช้ smoke test
+แต่ไม่นับว่าผ่าน gate เต็ม ชุดนี้อ่านอย่างเดียวและไม่อนุมัติ mutation แทนผู้ใช้
+
 ถ้าติดตั้งทับ daemon รุ่นเก่าแล้ว `argon agent` แจ้งว่า protocol ไม่พร้อม
 ให้รอ jobs จบก่อน restart daemon จากนั้นตรวจ `argon --status` ว่ามี `agentProtocol: 1`
-หลังอัปเดตเป็น extension 1.1.3 ให้ Reload ใน `brave://extensions` แล้ว refresh Gemini
-เพื่อเปิดใช้การจับ numeric tab ID แบบตรงตัว โดยไม่ fallback ไปแท็บชื่อคล้ายกัน
+หลังอัปเดตเป็น extension 1.1.4 ให้ Reload ใน `brave://extensions` แล้ว refresh Gemini
+เพื่อเปิดใช้การผูกงานกับ numeric tab ID, document และ conversation
+หากผู้ใช้เปลี่ยนหน้า ปิดแท็บ หรือ reload ระหว่างตอบ งานจะหยุดพร้อม error และทิ้งคำตอบที่ยืนยันเจ้าของไม่ได้
 
 ### คำสั่งที่ใช้บ่อย
 

@@ -21,10 +21,14 @@ pub struct State {
     pub turns: usize,
     pub editable: bool,
     pub commands: bool,
+    #[serde(default = "sandbox_default")]
+    pub command_sandbox: bool,
     pub transcript: Vec<Value>,
     pub calls: BTreeMap<String, Value>,
     pub reads: BTreeMap<String, String>,
     pub pending: Option<Value>,
+    #[serde(default)]
+    pub bridge_lease: Option<Value>,
     pub parent: Option<String>,
 }
 
@@ -32,6 +36,10 @@ pub struct Session {
     pub state: State,
     pub dir: PathBuf,
     _lock: File,
+}
+
+fn sandbox_default() -> bool {
+    true
 }
 
 pub fn private_file(path: &Path, create_new: bool) -> Result<File> {
@@ -91,10 +99,12 @@ impl Session {
             turns: 0,
             editable,
             commands,
+            command_sandbox: commands,
             transcript: vec![],
             calls: BTreeMap::new(),
             reads: BTreeMap::new(),
             pending: None,
+            bridge_lease: None,
             parent: None,
         };
         let session = Self {
@@ -163,7 +173,17 @@ impl Session {
     }
     pub fn resumable(&self) -> Result<()> {
         if let Some(pending) = &self.state.pending {
-            bail!("Session has uncertain unfinished intent: {pending}. Inspect the job/files/process; automatic resume and fork are disabled until this intent is reconciled manually.");
+            if pending["kind"] == "model_answer" {
+                ensure!(
+                    pending["nonce"].as_str().is_some() && pending["answer"].as_str().is_some(),
+                    "Malformed saved model response"
+                );
+                return Ok(());
+            }
+            bail!(
+                "Session has uncertain unfinished intent ({}). Inspect it with recover before continuing; automatic replay is disabled.",
+                pending["kind"].as_str().unwrap_or("unknown")
+            );
         }
         ensure!(
             self.state.status != "final",
@@ -220,5 +240,18 @@ mod tests {
         let loaded = Session::load(dir.path(), &id).unwrap();
         assert!(loaded.resumable().is_err());
         assert!(Session::load(dir.path(), "../escape").is_err());
+    }
+    #[test]
+    fn legacy_command_session_defaults_to_sandbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let session =
+            Session::create(dir.path(), dir.path().into(), "task".into(), true, true).unwrap();
+        let mut value = serde_json::to_value(&session.state).unwrap();
+        value.as_object_mut().unwrap().remove("command_sandbox");
+        let state: State = serde_json::from_value(value.clone()).unwrap();
+        assert!(state.command_sandbox);
+        value["command_sandbox"] = false.into();
+        let explicit_optout: State = serde_json::from_value(value).unwrap();
+        assert!(!explicit_optout.command_sandbox);
     }
 }

@@ -7,7 +7,10 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Component, Path, PathBuf},
-    sync::LazyLock,
+    process::{Child, Command, ExitStatus, Stdio},
+    sync::{mpsc, LazyLock},
+    thread,
+    time::{Duration, Instant},
 };
 use uuid::Uuid;
 
@@ -42,7 +45,132 @@ pub fn short(text: &str, max: usize) -> String {
         s
     }
 }
+fn unified_diff(name: &str, before: &str, after: &str) -> String {
+    if before == after {
+        return String::new();
+    }
+    let old: Vec<_> = before.split_inclusive('\n').collect();
+    let new: Vec<_> = after.split_inclusive('\n').collect();
+    let prefix = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+    let suffix = old[prefix..]
+        .iter()
+        .rev()
+        .zip(new[prefix..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let start = prefix.saturating_sub(3);
+    let old_end = (old.len() - suffix + 3).min(old.len());
+    let new_end = (new.len() - suffix + 3).min(new.len());
+    let mut result = format!(
+        "--- a/{name}\n+++ b/{name}\n@@ -{},{} +{},{} @@\n",
+        if old.is_empty() { 0 } else { start + 1 },
+        old_end - start,
+        if new.is_empty() { 0 } else { start + 1 },
+        new_end - start
+    );
+    let mut line = |marker: char, text: &str| {
+        result.push(marker);
+        result.push_str(text);
+        if !text.ends_with('\n') {
+            result.push_str("\n\\ No newline at end of file\n");
+        }
+    };
+    for text in &old[start..prefix] {
+        line(' ', text);
+    }
+    for text in &old[prefix..old.len() - suffix] {
+        line('-', text);
+    }
+    for text in &new[prefix..new.len() - suffix] {
+        line('+', text);
+    }
+    for text in &old[old.len() - suffix..old_end] {
+        line(' ', text);
+    }
+    result
+}
+fn trusted_git(root: &Path) -> Result<PathBuf> {
+    // Never search PATH: read-only tools must not execute a project-controlled shim.
+    let path = Path::new("/usr/bin/git");
+    ensure!(
+        cfg!(unix) && path.is_file(),
+        "Trusted system Git unavailable; git_diff is unsupported on this platform"
+    );
+    let path = path.canonicalize()?;
+    ensure!(
+        !path.starts_with(root),
+        "Git executable is inside workspace"
+    );
+    Ok(path)
+}
+
+fn bounded_blob(mut command: Command, timeout: Duration) -> Result<(ExitStatus, Vec<u8>)> {
+    struct Process(Child);
+    impl Drop for Process {
+        fn drop(&mut self) {
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(-(self.0.id() as i32), libc::SIGKILL);
+            }
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = Process(command.spawn().context("Cannot read Git HEAD blob")?);
+    let stdout = child.0.stdout.take().context("Missing Git stdout")?;
+    let (tx, rx) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let mut bytes = vec![];
+        let result = stdout.take(MAX_FILE + 1).read_to_end(&mut bytes);
+        let _ = tx.send(result.map(|_| bytes));
+    });
+    let started = Instant::now();
+    let mut bytes = None;
+    let mut status = None;
+    loop {
+        ensure!(
+            started.elapsed() < timeout,
+            "Git HEAD read deadline reached"
+        );
+        if bytes.is_none() {
+            match rx.recv_timeout(Duration::from_millis(20)) {
+                Ok(result) => {
+                    let output = result?;
+                    ensure!(
+                        output.len() as u64 <= MAX_FILE,
+                        "Git HEAD blob exceeds 256KB"
+                    );
+                    bytes = Some(output);
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    anyhow::bail!("Git output reader disconnected")
+                }
+            }
+        } else {
+            thread::sleep(Duration::from_millis(10));
+        }
+        if status.is_none() {
+            status = child.0.try_wait()?;
+        }
+        if let (Some(status), Some(bytes)) = (status, bytes.as_ref()) {
+            return Ok((status, bytes.clone()));
+        }
+    }
+}
 fn safe_name(path: &Path) -> bool {
+    if path.to_string_lossy().chars().any(|c| c.is_control()) {
+        return false;
+    }
     let lower = path.to_string_lossy().to_lowercase().replace('\\', "/");
     let name = path
         .file_name()
@@ -257,6 +385,43 @@ impl Workspace {
         );
         Ok(changed)
     }
+    pub fn preview_edit(&self, name: &str, hash: &str, old: &str, new: &str) -> Result<String> {
+        let changed = self.edited(name, hash, old, new)?;
+        Ok(short(
+            &unified_diff(name, &self.read(name)?, &changed),
+            20000,
+        ))
+    }
+    pub fn preview_create(&self, name: &str, content: &str) -> Result<String> {
+        self.check_new(name, content)?;
+        Ok(short(&unified_diff(name, "", content), 20000))
+    }
+    pub fn git_diff(&self, name: &str) -> Result<Value> {
+        let current = self.read(name)?;
+        // Read blobs directly: no external diff drivers, textconv, filters or shell.
+        let mut command = Command::new(trusted_git(&self.root)?);
+        command
+            .args(["--no-pager", "show", &format!("HEAD:./{name}")])
+            .current_dir(&self.root)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_NO_LAZY_FETCH", "1")
+            .env("GIT_OPTIONAL_LOCKS", "0");
+        let (status, bytes) = bounded_blob(command, Duration::from_secs(5))?;
+        ensure!(status.success(), "File must exist in Git HEAD");
+        ensure!(!bytes.contains(&0), "Binary Git HEAD blob denied");
+        let before = String::from_utf8(bytes).context("Git HEAD blob must be UTF-8")?;
+        ensure!(
+            !sensitive_text(&before),
+            "Git HEAD contains a potential credential; diff denied"
+        );
+        let diff = unified_diff(name, &before, &current);
+        Ok(
+            json!({"path":name,"base":"HEAD","diff":short(&diff,20000),"truncated":diff.chars().count()>20000}),
+        )
+    }
     pub fn edit(&self, name: &str, hash: &str, old: &str, new: &str) -> Result<Value> {
         let changed = self.edited(name, hash, old, new)?;
         let path = self.checked(name, true)?;
@@ -405,6 +570,93 @@ mod tests {
         assert_eq!(w.read("app.py").unwrap(), "return 2\n");
         assert!(w.edit("app.py", &hash, "return 1", "return 2").is_err());
         assert!(w.edited("app.py", &digest(b"return 2\n"), "", "x").is_err());
+    }
+    #[test]
+    fn unified_preview_matches_actual_change_and_final_newline() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("app.py"), "a\nreturn 1\nz\n").unwrap();
+        let w = Workspace::new(dir.path()).unwrap();
+        let preview = w
+            .preview_edit(
+                "app.py",
+                &digest(b"a\nreturn 1\nz\n"),
+                "return 1",
+                "return 2",
+            )
+            .unwrap();
+        assert_eq!(
+            preview,
+            "--- a/app.py\n+++ b/app.py\n@@ -1,3 +1,3 @@\n a\n-return 1\n+return 2\n z\n"
+        );
+        assert!(w
+            .preview_create("new.txt", "ไทย")
+            .unwrap()
+            .contains("@@ -0,0 +1,1 @@\n+ไทย\n\\ No newline at end of file"));
+        assert!(w.preview_create(".env", "hidden").is_err());
+    }
+    #[test]
+    fn git_diff_rejects_ignored_and_historical_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let status = Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .status()
+                .unwrap();
+            assert!(status.success());
+        };
+        git(&["init", "-q"]);
+        fs::write(dir.path().join("app.py"), "return 1\n").unwrap();
+        fs::write(dir.path().join(".gitignore"), "ignored.py\n").unwrap();
+        fs::write(dir.path().join("ignored.py"), "ignored").unwrap();
+        fs::write(
+            dir.path().join("config.py"),
+            r#"api_key = "examplecredentialvalue""#,
+        )
+        .unwrap();
+        git(&["add", "app.py", "config.py", ".gitignore"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "fixture",
+        ]);
+        fs::write(dir.path().join("app.py"), "return 2\n").unwrap();
+        fs::write(dir.path().join("config.py"), "now safe\n").unwrap();
+        let w = Workspace::new(dir.path()).unwrap();
+        let diff = w.git_diff("app.py").unwrap();
+        assert!(diff["diff"]
+            .as_str()
+            .unwrap()
+            .contains("-return 1\n+return 2"));
+        assert!(w.git_diff("config.py").is_err());
+        assert!(w.git_diff("ignored.py").is_err());
+        assert!(w.git_diff(".git/config").is_err());
+    }
+    #[test]
+    #[cfg(unix)]
+    fn git_reader_is_trusted_bounded_and_ignores_project_git_shim() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("git"), "#!/bin/sh\nexit 99\n").unwrap();
+        let binary = trusted_git(root.path()).unwrap();
+        assert_eq!(binary, Path::new("/usr/bin/git").canonicalize().unwrap());
+        assert!(!binary.starts_with(root.path()));
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", "sleep 10"]);
+        let started = Instant::now();
+        let error = bounded_blob(cmd, Duration::from_millis(100)).unwrap_err();
+        assert!(error.to_string().contains("deadline"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        let mut cmd = Command::new("/usr/bin/yes");
+        cmd.arg("oversized");
+        let error = bounded_blob(cmd, Duration::from_secs(2)).unwrap_err();
+        assert!(error.to_string().contains("256KB"));
     }
     #[test]
     fn create_never_overwrites_or_bypasses_project_ignore() {

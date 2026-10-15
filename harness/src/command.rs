@@ -51,6 +51,27 @@ pub fn run(
     cancelled: &AtomicBool,
     on_output: &mut dyn FnMut(&str, &str) -> Result<()>,
 ) -> Result<Value> {
+    run_inner(root, argv, timeout_s, cancelled, on_output, false)
+}
+
+pub fn run_sandboxed(
+    root: &Path,
+    argv: &[String],
+    timeout_s: u64,
+    cancelled: &AtomicBool,
+    on_output: &mut dyn FnMut(&str, &str) -> Result<()>,
+) -> Result<Value> {
+    run_inner(root, argv, timeout_s, cancelled, on_output, true)
+}
+
+fn run_inner(
+    root: &Path,
+    argv: &[String],
+    timeout_s: u64,
+    cancelled: &AtomicBool,
+    on_output: &mut dyn FnMut(&str, &str) -> Result<()>,
+    sandboxed: bool,
+) -> Result<Value> {
     ensure!(
         !argv.is_empty()
             && argv.len() <= 64
@@ -63,9 +84,14 @@ pub fn run(
         "Command timeout must be 1..120 seconds"
     );
     ensure!(!cancelled.load(Ordering::SeqCst), "Cancelled");
-    let mut cmd = Command::new(&argv[0]);
-    cmd.args(&argv[1..])
-        .current_dir(root)
+    let mut cmd = if sandboxed {
+        crate::sandbox::command(root, argv)?
+    } else {
+        let mut cmd = Command::new(&argv[0]);
+        cmd.args(&argv[1..]);
+        cmd
+    };
+    cmd.current_dir(root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -119,7 +145,17 @@ pub fn run(
     let mut timed_out = false;
     let mut stopped = false;
     let status = loop {
-        while let Ok((name, bytes)) = rx.try_recv() {
+        // A producer can keep the channel nonempty forever. Yield to deadline checks
+        // after a bounded batch even when stdout/stderr never stop.
+        for _ in 0..64 {
+            if cancelled.load(Ordering::SeqCst)
+                || started.elapsed() >= Duration::from_secs(timeout_s)
+            {
+                break;
+            }
+            let Ok((name, bytes)) = rx.try_recv() else {
+                break;
+            };
             let target = if name == "stdout" { &mut out } else { &mut err };
             let count = bytes.len().min(32000usize.saturating_sub(target.len()));
             target.extend_from_slice(&bytes[..count]);
@@ -201,6 +237,40 @@ mod tests {
     }
     #[test]
     #[cfg(unix)]
+    fn continuous_output_cannot_starve_timeout_or_cancellation() {
+        let root = tempfile::tempdir().unwrap();
+        let cancelled = AtomicBool::new(false);
+        let started = Instant::now();
+        let result = run(
+            root.path(),
+            &["/usr/bin/yes".into(), "continuous-output".into()],
+            1,
+            &cancelled,
+            &mut |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(result["timed_out"], true);
+        assert!(started.elapsed() < Duration::from_secs(3));
+        thread::scope(|scope| {
+            scope.spawn(|| {
+                thread::sleep(Duration::from_millis(80));
+                cancelled.store(true, Ordering::SeqCst);
+            });
+            let started = Instant::now();
+            let result = run(
+                root.path(),
+                &["/usr/bin/yes".into(), "continuous-output".into()],
+                10,
+                &cancelled,
+                &mut |_, _| Ok(()),
+            )
+            .unwrap();
+            assert_eq!(result["cancelled"], true);
+            assert!(started.elapsed() < Duration::from_secs(2));
+        });
+    }
+    #[test]
+    #[cfg(unix)]
     fn captures_failure_and_timeout_without_shell_expansion() {
         let dir = tempfile::tempdir().unwrap();
         let cancel = AtomicBool::new(false);
@@ -234,5 +304,30 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r["timed_out"], true);
+    }
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn run_sandboxed_refuses_to_read_file_outside_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret.txt");
+        std::fs::write(&secret, "secret that must not leave sandbox").unwrap();
+        let mut seen = String::new();
+        let result = run_sandboxed(
+            root.path(),
+            &["/bin/cat".into(), secret.to_string_lossy().into_owned()],
+            3,
+            &AtomicBool::new(false),
+            &mut |_, text| {
+                seen.push_str(text);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(result["success"], false);
+        assert!(!seen.contains("secret that must not leave sandbox"));
+        assert!(!result
+            .to_string()
+            .contains("secret that must not leave sandbox"));
     }
 }

@@ -1,6 +1,15 @@
 (() => {
   if (globalThis.__argonBridge) return;
   globalThis.__argonBridge = true;
+  // A new document gets a new identity even when a reload preserves the same URL.
+  const documentId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+  let pageUnloaded = false;
+  globalThis.addEventListener?.('pagehide', () => { pageUnloaded = true; });
+  const conversation = () => {
+    const value = globalThis.location;
+    if (!value) return '/app'; // Test environments without a Location.
+    return `${value.origin}${value.pathname}${value.search}`;
+  };
   let current = null;
   const sleep = ms => new Promise(resolve => setTimeout(resolve,ms));
   const visible = el => {
@@ -152,7 +161,7 @@
   async function deliver(job, result) {
     current.result = result;
     while (Date.now() < job.deadline + 120000) {
-      try { if ((await chrome.runtime.sendMessage({type:'argon:result',id:job.id,result}))?.accepted) return; } catch { /* Retry after worker wake. */ }
+      try { if ((await chrome.runtime.sendMessage({type:'argon:result',id:job.id,documentId,result}))?.accepted) return; } catch { /* Retry after worker wake. */ }
       await sleep(3000);
     }
   }
@@ -160,6 +169,34 @@
     if (current?.id === job.id) return;
     if (current && !current.result) throw new Error('Gemini bridge already busy');
     current = {id:job.id,result:null};
+    let ownedConversation = conversation(), submitted = false, promotedConversation = false, ownedInput, beforeQueries = new Set();
+    const newQueries = () => [...document.querySelectorAll('user-query')].filter(el => !beforeQueries.has(el));
+    const queryText = el => {
+      const text = el.querySelector?.('.query-text') || el;
+      return squash(text.textContent || text.innerText);
+    };
+    const matchesPrompt = el => queryText(el) === squash(job.prompt);
+    const assertOwnership = () => {
+      if (pageUnloaded || (job.documentId && job.documentId !== documentId))
+        throw new Error('Gemini document reloaded during job; result discarded');
+      if (ownedInput && editor() !== ownedInput)
+        throw new Error('Gemini conversation composer changed during job; result discarded');
+      const queries = submitted ? newQueries() : [];
+      if (queries.length > 1 || queries.some(el => queryText(el) && !matchesPrompt(el)))
+        throw new Error('Gemini received a different user prompt during job; result discarded');
+      const actual = conversation();
+      if (actual === ownedConversation) return true;
+      // Gemini assigns /app/<id> to a fresh /app chat after the first submission.
+      // Accept that transition only once and only while the same composer survives.
+      if (submitted && !promotedConversation && /\/app\/?$/.test(ownedConversation) &&
+          /\/app\/[^/?]+$/.test(actual) && ownedInput === editor()) {
+        // Route assignment and prompt rendering may land in separate DOM updates.
+        // While identity is incomplete, do not read or emit any response.
+        if (queries.length !== 1 || !matchesPrompt(queries[0])) return false;
+        ownedConversation = actual; promotedConversation = true; return true;
+      }
+      throw new Error('Gemini conversation changed during job; result discarded');
+    };
     const options = job.options || {};
     const view = createOverlay();
     let lastPhase = '', lastPartial = '', lastSent = 0, stashedDraft = null;
@@ -169,11 +206,13 @@
       // Preserve every DOM update for terminal streaming; skip only exact duplicates.
       if (phase === lastPhase && partial === lastPartial) return;
       lastPhase = phase; lastPartial = partial; lastSent = now;
-      try { chrome.runtime.sendMessage({type:'argon:progress',id:job.id,phase,partial})?.catch?.(() => {}); } catch { /* Progress is best-effort. */ }
+      try { chrome.runtime.sendMessage({type:'argon:progress',id:job.id,documentId,phase,partial})?.catch?.(() => {}); } catch { /* Progress is best-effort. */ }
     };
     let outcome;
     try {
       const input = editor();
+      ownedInput = input;
+      assertOwnership();
       if (!input) throw new Error('Gemini editor missing; sign in or check DOM selectors');
       if (stop()) throw new Error('Gemini is generating another response');
       if (draftText(input)) {
@@ -181,19 +220,23 @@
         stashedDraft = input.innerText;
       }
       const before = new Set(answers());
+      beforeQueries = new Set(document.querySelectorAll('user-query'));
       report('typing');
       replaceAll(input, job.prompt);
       if (squash(input.innerText) !== squash(job.prompt)) throw new Error('Prompt insertion verification failed; inspect draft');
       let button;
-      for (let i=0;i<40;i++) { button=send(); if (button && !button.disabled && button.getAttribute('aria-disabled') !== 'true') break; await sleep(250); }
+      for (let i=0;i<40;i++) { assertOwnership(); button=send(); if (button && !button.disabled && button.getAttribute('aria-disabled') !== 'true') break; await sleep(250); }
       if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') throw new Error('Gemini send button unavailable; check account limit');
       report('sending');
+      assertOwnership();
+      submitted = true;
       button.click();
       report('waiting');
       let sawStop=false, last='', stableSince=Date.now(), found=null;
       const deadline = Math.min(job.deadline-5000,Date.now()+140000);
       while (Date.now()<deadline) {
         await sleep(100);
+        if (!assertOwnership()) continue;
         const stopping = Boolean(stop()); sawStop ||= stopping;
         const response = answers().filter(el=>!before.has(el)).at(-1);
         const text = responseGroup(response).filter(el=>!before.has(el)).map(answerText).filter(Boolean).join('\n\n');
@@ -203,11 +246,12 @@
         if (text && !stopping && Date.now()-stableSince > (sawStop ? 2500:6000)) { found = text; break; }
       }
       if (found === null) throw new Error('Gemini response timed out or selectors changed; inspect tab before retrying');
+      assertOwnership();
       report('finishing', found);
       outcome = {text:found,model:model()};
     } catch (e) { outcome = {error:e.message,model:model()}; }
     if (stashedDraft !== null) {
-      try { const input = editor(); if (input && !draftText(input)) replaceAll(input, stashedDraft); }
+      try { assertOwnership(); const input = editor(); if (input && !draftText(input)) replaceAll(input, stashedDraft); }
       catch { /* Draft restore is best-effort; the answer is still delivered. */ }
     }
     view?.finish(!outcome.error, outcome.error);
@@ -220,7 +264,7 @@
       const draft = Boolean(input) && !stopButton && Boolean(draftText(input));
       const busy = Boolean(current && !current.result);
       reply({ready:Boolean(input) && !stopButton && !draft && !busy,draft:draft && !busy,generating:Boolean(stopButton),
-        jobId:current?.id,model:model(),title:globalThis.document?.title,
+        jobId:current?.id,documentId,conversation:conversation(),model:model(),title:globalThis.document?.title,
         error:!input ? 'Gemini editor missing; sign in' : stopButton ? 'Gemini is generating' : draft ? 'Unsent draft in Gemini' : ''});
     }
     if (message.type === 'argon:doctor') {

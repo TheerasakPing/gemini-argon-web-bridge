@@ -2,6 +2,8 @@ mod agent;
 mod command;
 mod protocol;
 mod provider;
+mod recovery;
+mod sandbox;
 mod session;
 mod workspace;
 
@@ -38,6 +40,8 @@ enum Commands {
         allow_edit: bool,
         #[arg(long, requires = "allow_edit")]
         allow_commands: bool,
+        #[arg(long, requires = "allow_commands")]
+        no_sandbox: bool,
         #[arg(long)]
         tab: Option<u64>,
         #[arg(long,default_value_t=20,value_parser=clap::value_parser!(u16).range(1..=100))]
@@ -46,12 +50,21 @@ enum Commands {
         max_seconds: u64,
     },
     Sessions,
+    Recover {
+        id: String,
+        #[arg(long, conflicts_with = "abandon")]
+        reconcile: bool,
+        #[arg(long)]
+        abandon: Option<String>,
+    },
     Resume {
         id: String,
         #[arg(long)]
         tab: Option<u64>,
         #[arg(long,default_value_t=20,value_parser=clap::value_parser!(u16).range(1..=100))]
         max_turns: u16,
+        #[arg(long)]
+        no_sandbox: bool,
     },
     Fork {
         id: String,
@@ -81,6 +94,16 @@ fn state_dir(explicit: Option<PathBuf>) -> Result<PathBuf> {
         .context("Cannot find home")?;
     Ok(PathBuf::from(home).join(".local/state/argon/sessions"))
 }
+fn connection() -> Result<provider::Bridge> {
+    let root = installation()?;
+    let token = fs::read_to_string(root.join("bridge/token"))
+        .context("Missing bridge pairing token; run installer")?;
+    provider::Bridge::new(
+        &env::var("ARGON_BRIDGE_URL").unwrap_or_else(|_| "http://127.0.0.1:8989".into()),
+        token.trim().into(),
+    )
+}
+
 fn execute(
     mut s: session::Session,
     tab: Option<u64>,
@@ -90,14 +113,22 @@ fn execute(
     cancelled: &AtomicBool,
 ) -> Result<()> {
     s.resumable()?;
-    let root = installation()?;
-    let token = fs::read_to_string(root.join("bridge/token"))
-        .context("Missing bridge pairing token; run installer")?;
-    let mut bridge = provider::Bridge::new(
-        &env::var("ARGON_BRIDGE_URL").unwrap_or_else(|_| "http://127.0.0.1:8989".into()),
-        token.trim().into(),
-    )?;
-    bridge.acquire(&s.state.id, tab)?;
+    if s.state.commands && s.state.command_sandbox {
+        sandbox::probe(&s.state.root)?;
+    }
+    let mut bridge = connection()?;
+    if let Some(saved) = &s.state.bridge_lease {
+        let health = bridge.api("/health", None)?;
+        if health["agentLeased"] == true {
+            bridge.restore(saved, tab)?;
+        } else {
+            bridge.acquire(&s.state.id, tab)?;
+        }
+    } else {
+        bridge.acquire(&s.state.id, tab)?;
+    }
+    s.state.bridge_lease = Some(json!({"token":bridge.lease,"tab":bridge.tab}));
+    s.save()?;
     let result = agent::run(
         &mut s,
         &bridge,
@@ -134,6 +165,7 @@ fn main() -> Result<()> {
             read_only: _,
             allow_edit,
             allow_commands,
+            no_sandbox,
             tab,
             max_turns,
             max_seconds,
@@ -144,8 +176,10 @@ fn main() -> Result<()> {
                 !task.trim().is_empty() && task.len() <= 16000,
                 "Task must be 1..16000 bytes"
             );
-            let s =
+            let mut s =
                 session::Session::create(&base, workspace.root, task, allow_edit, allow_commands)?;
+            s.state.command_sandbox = allow_commands && !no_sandbox;
+            s.save()?;
             execute(s, tab, max_turns, max_seconds, cli.json, &cancelled)
         }
         Commands::Sessions => {
@@ -165,14 +199,51 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Commands::Resume { id, tab, max_turns } => execute(
-            session::Session::load(&base, &id)?,
+        Commands::Recover {
+            id,
+            reconcile,
+            abandon,
+        } => {
+            let mut session = session::Session::load(&base, &id)?;
+            let report = if let Some(acknowledgement) = abandon {
+                recovery::abandon(&mut session, &acknowledgement)?
+            } else {
+                let requires_bridge = session
+                    .state
+                    .pending
+                    .as_ref()
+                    .is_some_and(|pending| pending["kind"] == "model_job");
+                let bridge = if requires_bridge {
+                    Some(connection()?)
+                } else {
+                    None
+                };
+                if reconcile {
+                    recovery::reconcile(&mut session, bridge.as_ref())?
+                } else {
+                    recovery::inspect(&session, bridge.as_ref())?
+                }
+            };
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
+        Commands::Resume {
+            id,
             tab,
             max_turns,
-            900,
-            cli.json,
-            &cancelled,
-        ),
+            no_sandbox,
+        } => {
+            let mut session = session::Session::load(&base, &id)?;
+            if no_sandbox {
+                ensure!(
+                    session.state.commands,
+                    "This session has command execution disabled"
+                );
+                session.state.command_sandbox = false;
+                session.save()?;
+            }
+            execute(session, tab, max_turns, 900, cli.json, &cancelled)
+        }
         Commands::Fork { id, task } => {
             let parent = session::Session::load(&base, &id)?;
             ensure!(

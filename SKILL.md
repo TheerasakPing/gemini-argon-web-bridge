@@ -15,11 +15,19 @@ The Python CLI auto-starts the loopback Node server. No npm or pip packages requ
 It lists, searches and reads project files as needed, rather than sending a fixed initial selection.
 `--allow-edit` enables approved edits/new files; `--allow-commands` additionally enables approved argv execution.
 Every mutation requires exact per-call approval in an interactive terminal; JSON/headless runs cannot approve.
-Commands run with user permissions and are not OS-sandboxed. Do not claim otherwise.
+Commands default to the macOS sandbox: workspace access plus system runtime reads, no network,
+and signals restricted to the same sandbox. Unsupported platforms fail closed.
+`--no-sandbox` explicitly opts into user permissions; sandbox limitations are documented in README.
+Edits show a unified diff before approval; `git_diff` reads one existing tracked text file against HEAD.
 Each model turn starts a fresh Gemini conversation in one leased tab; this changes the tab's current chat.
 Never auto-retry a pending/uncertain session. Sessions are under `~/.local/state/argon/sessions`
 (or `$XDG_STATE_HOME/argon/sessions`). `argon sessions`, `argon resume ID`, `argon fork ID --task "..."`
 manage sessions; fork does not roll back filesystem changes.
+`argon recover ID` inspects pending work without replay. `--reconcile` saves a completed bridge
+response or verifies current file hashes. Unknown command results need manual inspection and
+explicit `--abandon "abandon ID"`; abandonment never cancels external work or proves success.
+Extension 1.1.4 binds results to document/composer/conversation and requires Reload after installation.
+Live acceptance is still pending; automated tests do not prove Brave readiness or unlock a paid model.
 Install the optional harness from a repository checkout with
 `python3 scripts/install.py --with-harness` (Cargo/Rust 1.89+).
 If bridge health lacks `agentProtocol: 1`, restart it after current jobs finish.

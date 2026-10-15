@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 
 const source=readFileSync(new URL('../extension/content.js',import.meta.url),'utf8');
-function fixture({draft='',generating=false,hiddenStop=null,hiddenStopParent=null,paragraphs=false,changingStatus=false}={}) {
+function fixture({draft='',generating=false,hiddenStop=null,hiddenStopParent=null,paragraphs=false,changingStatus=false,onTick,initialPath='/app/owned',newQueries}={}) {
   let listener, clicks=0, ticks=0, now=1000, delivered; const messages=[]; const inserted=[];
   const result=new Promise(resolve=>{delivered=resolve;});
   const node={getClientRects:()=>[{}]};
@@ -23,9 +23,13 @@ function fixture({draft='',generating=false,hiddenStop=null,hiddenStopParent=nul
     get innerText(){return `Drafting ${ticks}...\nGemini บอกว่า\n${body.innerText}`;},
     querySelectorAll(selector){return selector==='model-response' ? [] : changingStatus ? [body,nested,second,thought] : [body,nested];}};
   const button={...node,disabled:false,getAttribute:()=>null,click(){clicks++;input.innerText='';}};
+  const events = {};
+  const location = {origin:'https://gemini.google.com',pathname:initialPath,search:''};
   const context=vm.createContext({
     Date:class extends Date {static now(){return now;}},
-    setTimeout(fn,ms){now+=ms;ticks++;queueMicrotask(fn);},
+    setTimeout(fn,ms){now+=ms;ticks++;onTick?.({ticks,location,input,events});queueMicrotask(fn);},
+    location,
+    addEventListener(name,fn){events[name]=fn;},
     InputEvent:class {},
     getComputedStyle(el){return {display:'block',visibility:'visible',opacity:'1',...el.style};},
     window:{getSelection:()=>({removeAllRanges(){},addRange(){}})},
@@ -35,6 +39,7 @@ function fixture({draft='',generating=false,hiddenStop=null,hiddenStopParent=nul
         if(selector.startsWith('button.stop')) return generating || (clicks && ticks<3) ? [node] : (hiddenStop || hiddenStopParent) ? [hidden]:[];
         if(selector.startsWith('button.send')) return [button];
         if(selector==='model-response') return clicks ? [old,fresh]:[old];
+        if(selector==='user-query') return clicks ? newQueries?.(ticks) || [] : [];
         return [];
       },
       createRange:()=>({selectNodeContents(){}}),
@@ -119,4 +124,35 @@ test('multi-line prompts survive the composer turning newlines into paragraphs',
   f.send({type:'argon:run',task:{id:'ml',prompt:'อธิบายโค้ด\n\ndef add(a,b):\n    return a+b',deadline:170000}});
   const delivered=await f.result;
   assert.equal(delivered.result.text,'NEW ANSWER'); assert.equal(f.clicks,1);
+});
+test('conversation navigation mid-generation discards unrelated answer and stops partials',async()=>{
+  const f=fixture({onTick({ticks,location}){if(ticks===4)location.pathname='/app/unrelated';}});
+  f.send({type:'argon:run',task:{id:'navigation',prompt:'hello',deadline:170000}});
+  const {result}=await f.result;
+  assert.match(result.error,/conversation changed/);
+  assert.equal(result.text,undefined);
+  assert.ok(!f.messages.some(m=>m.type==='argon:progress' && m.partial==='NEW ANSWER'));
+});
+test('pagehide mid-generation discards result even if URL remains the same',async()=>{
+  const f=fixture({onTick({ticks,events}){if(ticks===4)events.pagehide();}});
+  f.send({type:'argon:run',task:{id:'reload',prompt:'hello',deadline:170000}});
+  assert.match((await f.result).result.error,/document reloaded/);
+});
+test('dispatch bound to another document never inserts or sends prompt',async()=>{
+  const f=fixture();
+  f.send({type:'argon:run',task:{id:'stale',documentId:'previous-document',prompt:'hello',deadline:170000}});
+  assert.match((await f.result).result.error,/document reloaded/);
+  assert.equal(f.clicks,0);assert.equal(f.inserted.length,0);
+});
+test('fresh chat accepts one assigned conversation URL only with its own prompt echo',async()=>{
+  const f=fixture({initialPath:'/app',newQueries:()=>[{innerText:'hello'}],
+    onTick({ticks,location}){if(ticks===2)location.pathname='/app/created';}});
+  f.send({type:'argon:run',task:{id:'created',prompt:'hello',deadline:170000}});
+  assert.equal((await f.result).result.text,'NEW ANSWER');
+});
+test('fresh chat does not accept a URL transition containing someone else’s prompt',async()=>{
+  const f=fixture({initialPath:'/app',newQueries:()=>[{innerText:'unrelated question'}],
+    onTick({ticks,location}){if(ticks===2)location.pathname='/app/wrong';}});
+  f.send({type:'argon:run',task:{id:'wrong',prompt:'hello',deadline:170000}});
+  assert.match((await f.result).result.error,/different user prompt/);
 });
