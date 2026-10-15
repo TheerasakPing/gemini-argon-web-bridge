@@ -170,6 +170,7 @@ def main():
             print(json.dumps({'blocked': 'Failed run requires inspection before another submission',
                               'completed': len(results)}, ensure_ascii=False), flush=True)
             break
+        time.sleep(8)  # avoid hammering the free Gemini account
     passed = sum(r['passed'] for r in results)
     print(json.dumps({'passed': passed, 'completed': len(results),
                       'gate_met': len(results) == 10 and passed >= 9}), flush=True)

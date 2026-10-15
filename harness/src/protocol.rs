@@ -142,6 +142,7 @@ Reply in the user's language. Put user-facing progress/answers BEFORE the envelo
 For final, write the complete answer as normal prose before the envelope, and copy it into final.text.
 Inside the envelope all strings must be valid JSON: escape double quotes as \" and newlines as \n.
 Never put raw multiline text inside a JSON string. final.text is a JSON string too.
+Gemini's web page strips markdown asterisks, so inside the envelope write every * as \u002a (valid JSON escape).
 End with exactly one envelope; no text after it:
 {BEGIN}
 {{"version":1,"nonce":"{nonce}","id":"unique_call_id","action":{{"type":"read_file","path":"README.md","start_line":1,"end_line":160}}}}
