@@ -56,7 +56,7 @@ test('real Python CLI roundtrip with simulated extension, UTF-8 prompt and respo
   await call('/api/pending_task?client=simulator&ready=1');
   const script=fileURLToPath(new URL('../scripts/gemini_argon_bridge.py',import.meta.url));
   const python=spawn('python3',['-c',
-    'import importlib.util,sys,pathlib; s=importlib.util.spec_from_file_location("bridge",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); m.BASE=sys.argv[2]; m.ROOT=pathlib.Path(sys.argv[3]); sys.argv=["argon","ทดสอบ", "--timeout", "5"]; sys.exit(m.main())',script,base,root]);
+    'import importlib.util,sys,pathlib; s=importlib.util.spec_from_file_location("bridge",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); m.BASE=sys.argv[2]; m.ROOT=pathlib.Path(sys.argv[3]); sys.argv=["argon","ทดสอบ","--no-auto", "--timeout", "5"]; sys.exit(m.main())',script,base,root]);
   let output='',errors='';
   python.stdout.on('data',data=>output+=data); python.stderr.on('data',data=>errors+=data);
   const ended=new Promise((resolve,reject)=>{python.on('error',reject);python.on('close',resolve);});
@@ -101,7 +101,7 @@ for (const mode of ['default','buffered','json']) {
     const script=fileURLToPath(new URL('../scripts/gemini_argon_bridge.py',import.meta.url));
     const flags=mode==='buffered'?['--no-stream']:mode==='json'?['--stream','--json']:[];
     const python=spawn('python3',['-c',
-      'import importlib.util,sys,pathlib; s=importlib.util.spec_from_file_location("bridge",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); m.BASE=sys.argv[2]; m.ROOT=pathlib.Path(sys.argv[3]); sys.argv=["argon","ทดสอบ","--timeout","5",*sys.argv[4:]]; sys.exit(m.main())',script,base,root,...flags]);
+      'import importlib.util,sys,pathlib; s=importlib.util.spec_from_file_location("bridge",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); m.BASE=sys.argv[2]; m.ROOT=pathlib.Path(sys.argv[3]); sys.argv=["argon","ทดสอบ","--no-auto","--timeout","5",*sys.argv[4:]]; sys.exit(m.main())',script,base,root,...flags]);
     t.after(()=>python.kill());
     let output='',errors='',firstChunk;
     const firstOutput=new Promise(resolve=>{firstChunk=resolve;});

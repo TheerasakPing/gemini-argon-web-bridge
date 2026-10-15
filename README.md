@@ -126,6 +126,12 @@ argon --start
 # สนทนาต่อในแท็บเดิม
 argon "ช่วยอธิบาย Server-Sent Events พร้อมตัวอย่าง"
 
+# เลือกไฟล์จากโฟลเดอร์ปัจจุบันอัตโนมัติ (default)
+argon "ทำความเข้าใจโปรเจคนี้จากสิ่งที่มีตอนนี้"
+
+# คำถามทั่วไป โดยไม่แนบไฟล์อัตโนมัติ
+argon --no-auto "ช่วยอธิบาย Server-Sent Events"
+
 # เปิด conversation ใหม่ก่อนส่ง
 argon --new "ออกแบบ REST API สำหรับระบบจองห้องประชุม"
 
@@ -146,6 +152,21 @@ argon --json "สรุปข้อดีและข้อจำกัดขอ
 `--file` และ stdin จะถูกอ่านเป็นข้อความแล้วรวมใน prompt
 ไม่ได้อัปโหลดไฟล์แนบผ่าน UI ของ Gemini และไม่รองรับไฟล์ภาพหรือไฟล์ binary ด้วยวิธีนี้
 
+**Auto context เปิดเป็นค่าเริ่มต้น** เมื่อส่ง prompt ธรรมดา CLI จะเลือกไฟล์จาก working directory
+โดยให้ README, dependency manifests และ entrypoint มาก่อน และจัดอันดับชื่อไฟล์ที่ตรงกับคำถาม
+เช่น `fix login` จำกัด 8 ไฟล์ รวม 24,000 ตัวอักษร และ 6,000 ตัวอักษรต่อไฟล์
+ชื่อไฟล์ที่เลือกแสดงบน stderr; ไฟล์ยาวมีเครื่องหมาย `[truncated]`
+เป็นข้อมูลบางส่วนของโปรเจค จึงไม่ได้รับประกันว่าโมเดลจะเห็นทุก module หรืออ่านไฟล์เพิ่มเองได้
+
+ใน Git repository จะเคารพ ignore rules สำหรับไฟล์ untracked; ไฟล์ tracked ยังเป็น candidates ตามปกติ
+ข้าม hidden files, symlinks, binary, generated directories, lockfiles และชื่อ/รูปแบบ credential ที่รู้จัก
+นอก Git จะค้นหาแบบจำกัดความลึกและจำนวนไฟล์ โดยไม่ได้ตีความ `.gitignore`
+ไม่สแกนเมื่อ working directory เป็น home หรือ filesystem root
+ตัวกรองไม่รับประกันว่าจะตรวจพบ secret ทุกรูปแบบ ตรวจชื่อไฟล์ที่เลือกก่อนใช้กับข้อมูลอ่อนไหว
+
+ใช้ `--no-auto` เพื่อปิดเฉพาะคำสั่ง หรือ `export ARGON_AUTO_CONTEXT=0` เพื่อปิดเป็น default
+เมื่อระบุ `-f` หรือมี stdin จะใช้ข้อมูลที่ระบุแทน auto context; ใช้ `--auto` เพื่อรวมทั้งสองแบบ
+
 ### คำสั่งที่ใช้บ่อย
 
 | คำสั่ง / option | การทำงาน |
@@ -156,6 +177,8 @@ argon --json "สรุปข้อดีและข้อจำกัดขอ
 | `--doctor` | ตรวจ editor, ปุ่มส่ง และปุ่ม Stop บนหน้าเว็บ |
 | `--new`, `-n` | เปิด conversation ใหม่ก่อนส่ง prompt |
 | `--file PATH`, `-f PATH` | เพิ่มไฟล์ข้อความใน prompt; ระบุซ้ำได้ |
+| `--no-auto` | ปิดการเลือกไฟล์อัตโนมัติจาก working directory |
+| `--auto` | เปิด auto context แม้มี `-f`, stdin หรือปิดผ่าน environment |
 | `--tab ID_OR_TITLE` | เลือกแท็บด้วย ID หรือชื่อบางส่วน |
 | `--force` | เก็บ draft ชั่วคราว ส่ง prompt แล้วคืน draft เดิม |
 | `--no-stream` | รอคำตอบครบก่อนแสดง |
@@ -389,7 +412,7 @@ launchctl kickstart -k "gui/$(id -u)/com.argon.bridge"
 - **Per-install token** — Installer สร้าง token เฉพาะเครื่องใน `bridge/token` และ `extension/config.js`; อัปเดตซ้ำจะใช้ token เดิม
 - **Browser session** — ใช้ session ที่ล็อกอินในเบราว์เซอร์ ไม่ต้องส่ง Google password หรือ cookie ให้ CLI
 - **Conversation data** — คำถามและคำตอบถูกส่งให้ Gemini และอาจถูกบันทึกทั้งใน conversation ของ Google และประวัติ bridge ในเครื่อง
-- **Local files** — ไฟล์ข้อความที่ส่งด้วย `-f` หรือ stdin จะกลายเป็นส่วนหนึ่งของ prompt
+- **Local files** — auto context เปิดเป็น default: ไฟล์ที่ CLI เลือกจาก working directory รวมถึง `-f` และ stdin จะถูกส่งไปยัง Gemini เป็นส่วนหนึ่งของ prompt ใช้ `--no-auto` เพื่อส่งเฉพาะข้อมูลที่ระบุ
 - **Health visibility** — `GET /health` ไม่ต้องใช้ token และมีชื่อแท็บบางส่วนกับสถานะล่าสุด จึงไม่ควรนำ port นี้ไปเปิดสาธารณะ
 
 | ไฟล์ | เนื้อหา |

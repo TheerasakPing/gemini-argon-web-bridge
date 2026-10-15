@@ -8,6 +8,14 @@ description: Use when the user invokes /argon or asks to send a prompt through t
 For `/argon <prompt>`, run `argon` with the prompt as one safely quoted argument.
 For `/argon --status`, run `argon --status` and report its actual readiness fields.
 The Python CLI auto-starts the loopback Node server. No npm or pip packages required.
+Run from the user's project directory: ordinary prompts automatically select relevant local
+text files. For example, `argon "ทำความเข้าใจโปรเจคนี้จากสิ่งที่มีตอนนี้"` prioritizes
+README, dependency manifests and entrypoints. Context is a partial selection, never a full project scan.
+Up to 8 files / 24,000 characters total / 6,000 per file; filenames appear on stderr.
+Git ignore rules, hidden files, generated directories and common credentials are excluded.
+Filters cannot guarantee detection of every secret. Use `--no-auto` for standalone questions
+or `ARGON_AUTO_CONTEXT=0` to disable globally. Explicit `-f` or stdin replaces automatic context;
+`--auto` combines them. The Gemini web model does not receive filesystem tools.
 
 ```sh
 argon --status                          # readiness (server / extension / Gemini tab)
