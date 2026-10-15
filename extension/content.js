@@ -185,8 +185,11 @@
       if (ownedInput && editor() !== ownedInput)
         throw new Error('Gemini conversation composer changed during job; result discarded');
       const queries = submitted ? newQueries() : [];
-      if (queries.length > 1 || queries.some(el => queryText(el) && !matchesPrompt(el)))
-        throw new Error('Gemini received a different user prompt during job; result discarded');
+      if (queries.length > 1 || queries.some(el => queryText(el) && !matchesPrompt(el))) {
+        const want = squash(job.prompt), got = queries.map(queryText);
+        const a = got[0] || '', at = [...want].findIndex((c, i) => c !== a[i]);
+        throw new Error(`Gemini received a different user prompt during job; result discarded (new=${queries.length} want=${want.length} got=${got.map(g => g.length)} diff@${at} want"${want.slice(Math.max(0, at-20), at+30)}" got"${a.slice(Math.max(0, at-20), at+30)}")`);
+      }
       const actual = conversation();
       if (actual === ownedConversation)
         return !submitted || (queries.length === 1 && matchesPrompt(queries[0]));
