@@ -39,7 +39,8 @@ function fixture({draft='',generating=false,hiddenStop=null,hiddenStopParent=nul
         if(selector.startsWith('button.stop')) return generating || (clicks && ticks<3) ? [node] : (hiddenStop || hiddenStopParent) ? [hidden]:[];
         if(selector.startsWith('button.send')) return [button];
         if(selector==='model-response') return clicks ? [old,fresh]:[old];
-        if(selector==='user-query') return clicks ? newQueries?.(ticks) || [] : [];
+        if(selector==='user-query') return clicks
+          ? newQueries ? newQueries(ticks) : [{innerText:inserted[0]}] : [];
         return [];
       },
       createRange:()=>({selectNodeContents(){}}),
@@ -156,3 +157,52 @@ test('fresh chat does not accept a URL transition containing someone else’s pr
   f.send({type:'argon:run',task:{id:'wrong',prompt:'hello',deadline:170000}});
   assert.match((await f.result).result.error,/different user prompt/);
 });
+test('fresh chat verifies rendered paragraph boundaries instead of concatenated textContent',async()=>{
+  const prompt='Understand this project.\nRead README.md first.\nList the source files.';
+  const query={querySelector:()=>({
+    textContent:'Understand this project.Read README.md first.List the source files.',
+    innerText:'Understand this project.\n\nRead README.md first.\n\nList the source files.'
+  })};
+  const f=fixture({initialPath:'/app',newQueries:()=>[query],
+    onTick({ticks,location}){if(ticks===2)location.pathname='/app/created';}});
+  f.send({type:'argon:run',task:{id:'paragraph-echo',prompt,deadline:170000}});
+  assert.equal((await f.result).result.text,'NEW ANSWER');
+});
+test('rendered prompt mismatch is rejected even when textContent matches',async()=>{
+  const query={querySelector:()=>({textContent:'hello',innerText:'another prompt'})};
+  const f=fixture({newQueries:()=>[query]});
+  f.send({type:'argon:run',task:{id:'rendered-mismatch',prompt:'hello',deadline:170000}});
+  assert.match((await f.result).result.error,/different user prompt/);
+});
+test('prompt echo without innerText uses exact textContent fallback',async()=>{
+  const f=fixture({newQueries:()=>[{textContent:'hello'}]});
+  f.send({type:'argon:run',task:{id:'text-fallback',prompt:'hello',deadline:170000}});
+  assert.equal((await f.result).result.text,'NEW ANSWER');
+});
+test('empty rendered echo cannot hide a mismatched textContent prompt',async()=>{
+  const f=fixture({newQueries:()=>[{innerText:'  ',textContent:'another prompt'}]});
+  f.send({type:'argon:run',task:{id:'empty-rendered',prompt:'hello',deadline:170000}});
+  assert.match((await f.result).result.error,/different user prompt/);
+  assert.ok(!f.messages.some(m=>m.type==='argon:progress' && m.partial));
+});
+test('missing or empty prompt echo never emits an answer on the same URL',async()=>{
+  for(const queries of [[],[{innerText:'',textContent:''}]]) {
+    const f=fixture({newQueries:()=>queries});
+    f.send({type:'argon:run',task:{id:'missing-echo',prompt:'hello',deadline:9000}});
+    assert.match((await f.result).result.error,/timed out/);
+    assert.ok(!f.messages.some(m=>m.type==='argon:progress' && m.partial));
+  }
+});
+for (const changed of [false,true]) {
+  test(`long paragraph/code echo ${changed ? 'rejects one changed word' : 'matches rendered whitespace'}`,async()=>{
+    const prompt=Array.from({length:40},(_,i)=>`Section ${i}\nRead file_${i}.py.\n    return a + b`).join('\n\n');
+    const rendered=(changed ? prompt.replace('file_20.py','other_20.py') : prompt).replace(/\n/g,'\n\n');
+    const f=fixture({newQueries:()=>[{querySelector:()=>({
+      textContent:rendered.replace(/\n/g,''),innerText:rendered
+    })}]});
+    f.send({type:'argon:run',task:{id:`long-${changed}`,prompt,deadline:170000}});
+    const {result}=await f.result;
+    if(changed) assert.match(result.error,/different user prompt/);
+    else assert.equal(result.text,'NEW ANSWER');
+  });
+}

@@ -222,7 +222,7 @@ tab binding ขั้นต่ำต้องมีตั้งแต่ prototy
 ## ขั้นถัดไป
 
 parser/provider/read loop และ opt-in editing/commands ทำแล้วพร้อม automated fixtures
-ขั้นถัดไปคือ live gate 10 งาน, reconciliation และ OS sandbox ก่อนยกระดับเป็น stable
+ขั้นถัดไปคือ live gate 10 งาน และยืนยัน recovery/OS sandbox ใน workflow จริงก่อนยกระดับเป็น stable
 
 ## แผนปรับปรุง: รวมแนวคิดจากห้า harness
 
@@ -339,3 +339,20 @@ parser/provider/read loop และ opt-in editing/commands ทำแล้ว�
   ตรวจ hash ตรงกับ source/build และ symlink เดิมยังถูกต้อง;
   `argon --doctor` ยังเห็น extension ที่ Brave โหลดเป็น 1.1.3 จึงต้อง Reload และ refresh ก่อนรัน live รอบใหม่
   สถานะ bridge ล่าสุด ready, queue 0, ไม่มี agent lease; หน้าเว็บเลือก Flash-Lite และ modelVerified ยัง false
+
+### Live รอบ 3 และ Extension 1.1.5 — 2026-10-16
+
+- หลังผู้ใช้ Reload ยืนยัน Brave โหลด 1.1.4 และแท็บพร้อมแล้ว
+- Live suite หยุดงานแรกหลัง 3.52 วินาทีด้วย
+  `Gemini received a different user prompt during job; result discarded`
+  ยังไม่มี tool execution หรือ streaming evidence; รายงานอยู่ที่
+  `/tmp/argon-live-acceptance-20261016-round3/report.json`
+- พบ bug ที่ reproduce ได้: `textContent` รวมข้อความคนละ paragraph ติดกัน
+  ทำให้ prompt หลายบรรทัดเทียบไม่ตรง แก้เป็น rendered `innerText` พร้อม fallback เมื่อว่าง
+  ยังไม่มี DOM จาก Brave ยืนยันว่าเป็นสาเหตุเดียวของ live failure
+- ทีมรีวิวพบช่องรับคำตอบก่อนยืนยัน prompt echo บน URL เดิม
+  แก้ให้ต้องมี echo เดียวที่ตรงกันก่อนอ่านหรือส่ง partial/result
+- Node ผ่าน 57/57 และ Python ผ่าน 28/28 ในรอบนี้
+  เพิ่ม regression 7 กรณี; Rust ไม่เปลี่ยนจากรอบที่ผ่าน unit 20 กรณี
+- Extension source 1.1.5 ต้อง Reload และ refresh Gemini ก่อนทดสอบ live ต่อ
+  ยังไม่ผ่าน live gate 9/10 และคงสถานะ experimental

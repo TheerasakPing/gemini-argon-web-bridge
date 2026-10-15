@@ -173,7 +173,10 @@
     const newQueries = () => [...document.querySelectorAll('user-query')].filter(el => !beforeQueries.has(el));
     const queryText = el => {
       const text = el.querySelector?.('.query-text') || el;
-      return squash(text.textContent || text.innerText);
+      // textContent joins adjacent paragraphs without their rendered line breaks.
+      // Compare the same rendered representation used to verify the composer.
+      const rendered = squash(text.innerText);
+      return rendered || squash(text.textContent);
     };
     const matchesPrompt = el => queryText(el) === squash(job.prompt);
     const assertOwnership = () => {
@@ -185,7 +188,8 @@
       if (queries.length > 1 || queries.some(el => queryText(el) && !matchesPrompt(el)))
         throw new Error('Gemini received a different user prompt during job; result discarded');
       const actual = conversation();
-      if (actual === ownedConversation) return true;
+      if (actual === ownedConversation)
+        return !submitted || (queries.length === 1 && matchesPrompt(queries[0]));
       // Gemini assigns /app/<id> to a fresh /app chat after the first submission.
       // Accept that transition only once and only while the same composer survives.
       if (submitted && !promotedConversation && /\/app\/?$/.test(ownedConversation) &&
@@ -246,12 +250,15 @@
         if (text && !stopping && Date.now()-stableSince > (sawStop ? 2500:6000)) { found = text; break; }
       }
       if (found === null) throw new Error('Gemini response timed out or selectors changed; inspect tab before retrying');
-      assertOwnership();
+      if (!assertOwnership()) throw new Error('Gemini prompt ownership could not be confirmed; result discarded');
       report('finishing', found);
       outcome = {text:found,model:model()};
     } catch (e) { outcome = {error:e.message,model:model()}; }
     if (stashedDraft !== null) {
-      try { assertOwnership(); const input = editor(); if (input && !draftText(input)) replaceAll(input, stashedDraft); }
+      try {
+        if (!assertOwnership()) throw new Error('Gemini prompt ownership could not be confirmed; draft not restored');
+        const input = editor(); if (input && !draftText(input)) replaceAll(input, stashedDraft);
+      }
       catch { /* Draft restore is best-effort; the answer is still delivered. */ }
     }
     view?.finish(!outcome.error, outcome.error);
