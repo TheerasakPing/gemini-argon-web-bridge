@@ -1,6 +1,6 @@
 # แผนสร้าง Argon Agent Harness
 
-สถานะ: ส่งมอบ Rust harness v0.1.0 แบบ experimental; live gate 10 งานยังไม่ผ่าน  
+สถานะ: ส่งมอบ Rust harness v0.1.0 แบบ experimental; live gate 10 งานผ่าน 10/10 (round 11, Extension 1.1.8, Flash-Lite; โหมดอ่านอย่างเดียว) — ยังไม่ทดสอบ live แบบแก้ไฟล์/รันคำสั่ง  
 วันที่: 16 ตุลาคม 2026  
 ฐานโค้ด: Argon Web Bridge, commit `cd7d562`
 
@@ -222,7 +222,7 @@ tab binding ขั้นต่ำต้องมีตั้งแต่ prototy
 ## ขั้นถัดไป
 
 parser/provider/read loop และ opt-in editing/commands ทำแล้วพร้อม automated fixtures
-ขั้นถัดไปคือ live gate 10 งาน และยืนยัน recovery/OS sandbox ใน workflow จริงก่อนยกระดับเป็น stable
+ขั้นถัดไปคือทดสอบ live แบบ edit/command และยืนยัน recovery/OS sandbox ใน workflow จริงก่อนยกระดับเป็น stable
 
 ## แผนปรับปรุง: รวมแนวคิดจากห้า harness
 
@@ -356,3 +356,10 @@ parser/provider/read loop และ opt-in editing/commands ทำแล้ว�
   เพิ่ม regression 7 กรณี; Rust ไม่เปลี่ยนจากรอบที่ผ่าน unit 20 กรณี
 - Extension source 1.1.5 ต้อง Reload และ refresh Gemini ก่อนทดสอบ live ต่อ
   ยังไม่ผ่าน live gate 9/10 และคงสถานะ experimental
+
+### Live รอบ 4–11 และ Extension 1.1.6–1.1.8 — 2026-10-16
+- สาเหตุที่พบจริง: ป้าย "You said" นำหน้า user turn (1.1.7 จับคู่แบบ containment); `tabs.onUpdated` ยกเลิกงานตอน Gemini เปลี่ยน `/app` เป็น `/app/<id>` (1.1.8);
+  โมเดลลอก call id ตัวอย่าง (harness ออก id ใหม่); Gemini กิน `*` เป็น markdown และแปลงสูตรเป็น LaTeX ทำ JSON เสีย (protocol สั่งใช้ `\u002a` และห้ามสูตร)
+- ปรับข้อสอบ: ระบุ `intent` ให้ชัด, เว้น 8 วินาทีระหว่างเคส, เพิ่ม `--keep-going`
+- ผล round 11 (`/tmp/argon-live-acceptance-20261016-round11/report.json`): 10/10 มี partial จาก job เดียวกันก่อน final; gate 9/10 ผ่านสำหรับงานอ่านอย่างเดียว
+- ข้อจำกัด: โมเดลหน้าเว็บ Flash-Lite, modelVerified=false; ผ่านหลังปรับ prompt/ข้อสอบ; ยังไม่ติดป้าย production-ready
