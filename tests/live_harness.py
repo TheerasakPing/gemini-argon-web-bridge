@@ -78,7 +78,7 @@ def main():
             'ห้ามเดาค่า CHECK_ID ห้ามแก้ไฟล์หรือรัน command '
             'ก่อน control envelope ให้เขียนคำอธิบายความคืบหน้าจากหลักฐาน 4-6 ประโยค '
             'ปิดท้ายคำตอบใน final.text ด้วยรูปแบบ FACTS: entry=<ชื่อไฟล์>; '
-            'intent=<ชื่อ operation ภาษาอังกฤษจาก README>; actual=<เครื่องหมาย operator จริง>; '
+            'intent=<คำนามผลลัพธ์ที่ README บอกว่า add คืนค่า เช่น sum/product ไม่ใช่ชื่อฟังก์ชัน>; actual=<เครื่องหมาย operator จริง>; '
             'output=<จำนวนเต็มที่โปรแกรมจะพิมพ์> โดยอนุมานค่าทั้งหมดจากไฟล์ '
             'ตอบกระชับ ใช้ JSON escaping ให้ถูกต้อง'
         )
