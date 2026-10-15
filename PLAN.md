@@ -1,6 +1,6 @@
 # แผนสร้าง Argon Agent Harness
 
-สถานะ: ส่งมอบ Rust harness v0.1.0 แบบ experimental; live gate 10 งานผ่าน 10/10 (round 11, Extension 1.1.8, Flash-Lite; โหมดอ่านอย่างเดียว) — ยังไม่ทดสอบ live แบบแก้ไฟล์/รันคำสั่ง  
+สถานะ: ส่งมอบ Rust harness v0.1.0 แบบ experimental; live gate 10 งานผ่าน 10/10 (round 11, Extension 1.1.8, Flash-Lite; โหมดอ่านอย่างเดียว) — live แบบแก้ไฟล์ผ่าน (`edit_file` อนุมัติและไฟล์เปลี่ยนจริง, ตรวจด้วย diff และ test นอก harness); live `run_command` ยังไม่ผ่านเพราะ macOS sandbox บล็อก Homebrew python3 (dyld)
 วันที่: 16 ตุลาคม 2026  
 ฐานโค้ด: Argon Web Bridge, commit `cd7d562`
 
@@ -222,7 +222,7 @@ tab binding ขั้นต่ำต้องมีตั้งแต่ prototy
 ## ขั้นถัดไป
 
 parser/provider/read loop และ opt-in editing/commands ทำแล้วพร้อม automated fixtures
-ขั้นถัดไปคือทดสอบ live แบบ edit/command และยืนยัน recovery/OS sandbox ใน workflow จริงก่อนยกระดับเป็น stable
+ขั้นถัดไปคือให้ `run_command` ผ่านใน live (ทดสอบด้วย python ที่ sandbox โหลดได้ หรือกำหนด interpreter ใน allowlist) และยืนยัน recovery/OS sandbox ใน workflow จริงก่อนยกระดับเป็น stable
 
 ## แผนปรับปรุง: รวมแนวคิดจากห้า harness
 
