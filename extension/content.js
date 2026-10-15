@@ -175,10 +175,11 @@
       const text = el.querySelector?.('.query-text') || el;
       // textContent joins adjacent paragraphs without their rendered line breaks.
       // Compare the same rendered representation used to verify the composer.
+      // Gemini prepends a screen-reader label ("You said"), so match by containment.
       const rendered = squash(text.innerText);
       return rendered || squash(text.textContent);
     };
-    const matchesPrompt = el => queryText(el) === squash(job.prompt);
+    const matchesPrompt = el => { const t = queryText(el), w = squash(job.prompt); return t === w || (w.length >= 20 && t.includes(w)); };
     const assertOwnership = () => {
       if (pageUnloaded || (job.documentId && job.documentId !== documentId))
         throw new Error('Gemini document reloaded during job; result discarded');
