@@ -1,0 +1,11 @@
+# Local credentials and conversations — never publish these.
+bridge/*
+!bridge/server.mjs
+extension/config.js
+__pycache__/
+*.py[cod]
+.DS_Store
+*.log
+.env
+.env.*
+dist/

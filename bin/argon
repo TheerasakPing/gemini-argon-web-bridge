@@ -1,0 +1,2 @@
+#!/bin/sh
+ARGON_STREAM=1 exec python3 "$HOME/.gemini/config/skills/argon/scripts/gemini_argon_bridge.py" "$@"
