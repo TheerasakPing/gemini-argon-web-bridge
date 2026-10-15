@@ -288,7 +288,7 @@ pub fn run(
                 continue;
             }
         };
-        let Envelope { id, action, .. } = envelope;
+        let Envelope { mut id, action, .. } = envelope;
         if let Action::Final { text } = &action {
             session.state.pending = None;
             session.state.turns += 1;
@@ -307,11 +307,21 @@ pub fn run(
             return Ok(());
         }
         let serialized = serde_json::to_value(&action)?;
+        // Models often copy the example id literally; give a different action a fresh id.
+        if session
+            .state
+            .calls
+            .get(&id)
+            .is_some_and(|saved| saved["action"] != serialized)
+        {
+            let base = id.clone();
+            let mut n = 2;
+            while session.state.calls.contains_key(&id) {
+                id = format!("{base}-{n}");
+                n += 1;
+            }
+        }
         if let Some(saved) = session.state.calls.get(&id).cloned() {
-            ensure!(
-                saved["action"] == serialized,
-                "Call id reused with different arguments"
-            );
             session
                 .state
                 .transcript
