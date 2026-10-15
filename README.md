@@ -1,78 +1,330 @@
+<div align="center">
+
 # Gemini Argon Web Bridge
 
-ใช้ Gemini ผ่านเว็บที่ล็อกอินไว้ จาก Terminal หรือ Antigravity พร้อมสตรีมข้อความจากหน้าเว็บ
-ทำงานบนเครื่องคุณผ่าน Node.js + Python standard library ไม่มี npm/pip dependencies
+**จาก Gemini บนเว็บ สู่เครื่องมือที่คุณใช้งานทุกวัน**
 
-**ใช้ได้เฉพาะโมเดลและโควตาที่บัญชีคุณมีสิทธิ์** ชื่อ Argon คือชื่อ bridge ไม่ใช่การยืนยันโมเดล Gemini 4 และไม่ได้ปลดล็อกแพ็กเกจที่เสียเงิน
+เรียกใช้ Gemini session ของคุณผ่าน Terminal, Antigravity, MCP และ Chat Completions API<br>
+พร้อมสตรีมข้อความจากหน้าเว็บ และ bridge ที่ทำงานบนเครื่องคุณ
 
-## ติดตั้งและเปิดด้วยคำสั่งเดียว
+[![Tests](https://github.com/TheerasakPing/gemini-argon-web-bridge/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/TheerasakPing/gemini-argon-web-bridge/actions/workflows/test.yml)
+[![Release](https://img.shields.io/github/v/release/TheerasakPing/gemini-argon-web-bridge?color=2563eb)](https://github.com/TheerasakPing/gemini-argon-web-bridge/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-059669.svg)](LICENSE)
 
-ต้องมี **Node.js 20+**, **Python 3.9+**, Chrome/Brave 120+ และล็อกอิน Gemini
+Node.js 20+ · Python 3.9+ · Manifest V3 · ไม่มี npm/pip dependencies
 
-macOS / Linux:
+[ติดตั้ง](#quick-start) · [คำสั่งใช้งาน](#usage) · [เชื่อมต่อเครื่องมือ](#integrations) · [สถาปัตยกรรม](#how-it-works) · [แก้ปัญหา](#troubleshooting)
+
+</div>
+
+---
+
+Argon เชื่อม CLI เข้ากับแท็บ Gemini ที่คุณล็อกอินไว้ ผ่าน extension สำหรับ Chrome/Brave
+คุณเลือกโมเดลจากหน้าเว็บ ส่ง prompt จาก Terminal และรับข้อความกลับระหว่างที่หน้าเว็บแสดงคำตอบ
+โดยไม่ต้องตั้งค่า Gemini API key
+
+> [!IMPORTANT]
+> **Argon คือชื่อ bridge ไม่ใช่ชื่อโมเดลที่ระบบรับรอง**
+> ระบบใช้ได้เฉพาะโมเดลและโควตาที่บัญชีคุณมีสิทธิ์ ไม่ปลดล็อกแพ็กเกจเสียเงิน
+> และไม่สามารถยืนยัน internal model ID จากข้อความบนหน้าเว็บได้
+> คำถามและคำตอบยังประมวลผลผ่านบริการ Gemini ของ Google
+
+## Why Argon
+
+| ความสามารถ | สิ่งที่ได้ |
+| :--- | :--- |
+| **Terminal streaming** | แสดงข้อความตามการอัปเดตของหน้าเว็บ เปิดเป็นค่าเริ่มต้น |
+| **เริ่มใช้งานง่าย** | Installer สร้าง token, ติดตั้ง CLI และเปิดหน้า setup ให้ |
+| **ใช้ conversation เดิมได้** | สนทนาต่อในแท็บที่เลือก หรือใช้ `--new` เพื่อเริ่มใหม่ |
+| **รับข้อมูลจาก workflow เดิม** | รองรับ piped stdin, ไฟล์ข้อความหลายไฟล์ และผลลัพธ์ JSON |
+| **เชื่อมต่อ agent** | มี Antigravity skill, MCP tools และ Chat Completions endpoint |
+| **ติดตามงานได้** | มีสถานะ CLI, animation บนหน้าเว็บ, popup และคำสั่งตรวจ selectors |
+| **ควบคุมงานในเครื่อง** | Queue ทำงานทีละงาน พร้อม claim token ป้องกันการรับงานซ้ำ |
+
+## Quick start
+
+### 1. ตรวจ prerequisites
+
+| องค์ประกอบ | ข้อกำหนด |
+| :--- | :--- |
+| Runtime | Node.js **20+** และ Python **3.9+** |
+| Browser | Chrome หรือ Brave **120+** ที่โหลด unpacked extension ได้ |
+| Account | ล็อกอิน Gemini และเลือกโมเดลที่บัญชีใช้งานได้ |
+| Port | `127.0.0.1:8989` ต้องว่าง หรือมี Argon instance ที่ใช้งานอยู่ |
+| Installer บน Unix | มี `curl` และ `tar` |
+
+```sh
+node --version
+python3 --version
+```
+
+### 2. ติดตั้งและเปิด setup
+
+**macOS / Linux**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/TheerasakPing/gemini-argon-web-bridge/main/install.sh | sh
 ```
 
-Windows PowerShell:
+**Windows PowerShell**
 
 ```powershell
 & ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/TheerasakPing/gemini-argon-web-bridge/main/install.ps1).Content))
 ```
 
-Installer สร้าง token เฉพาะเครื่อง เพิ่มคำสั่ง `argon` เข้า User PATH เปิด background bridge และหน้า Gemini
-บน macOS เลือก Brave Beta → Brave → Chrome ตามลำดับถ้าติดตั้งไว้
-หากยังเรียก `argon` ไม่ได้ ให้เปิด Terminal ใหม่
+Installer จะติดตั้ง CLI และ skill, สร้าง token เฉพาะเครื่อง, เพิ่ม User PATH,
+เริ่ม background bridge และพยายามเปิดหน้า setup พร้อม Gemini
+บน macOS จะเลือก Brave Beta → Brave → Chrome ตามแอปที่ติดตั้งไว้
+บนระบบอื่นจะใช้ browser เริ่มต้น จึงควรตั้งให้เป็น Chrome/Brave หรือเปิดหน้าที่แสดงเอง
 
-**ครั้งแรกทำ 2 ขั้นตอนในเบราว์เซอร์:**
+หากต้องการตรวจ source ก่อนรัน ใช้วิธี [ติดตั้งจาก source](#installation-options)
 
-1. ที่ `chrome://extensions` หรือ `brave://extensions` เปิด **Developer mode** → **Load unpacked** → เลือกโฟลเดอร์ `extension` ตาม path ที่ installer แสดง
-2. เปิด Gemini ล็อกอิน เลือกโมเดลที่ใช้ได้ และเว้นช่องพิมพ์ว่าง จากนั้นรัน `argon --status`
+### 3. เชื่อม extension ครั้งแรก
 
-การโหลด unpacked extension ครั้งแรกยังต้องกดเองในเบราว์เซอร์ คำสั่งติดตั้งไม่เปลี่ยนนโยบายหรือสิทธิ์เบราว์เซอร์ให้
+1. เปิด `brave://extensions` หรือ `chrome://extensions` → เปิด **Developer mode** → **Load unpacked** → เลือกโฟลเดอร์ `extension` ตาม path ที่ installer แสดง
+2. เปิด Gemini ใน browser/profile เดียวกัน ล็อกอิน เลือกโมเดล และเว้นช่องพิมพ์ว่าง
 
-## เปิดใช้งานครั้งถัดไป
+| ระบบ | ตำแหน่ง extension เริ่มต้น |
+| :--- | :--- |
+| macOS / Linux | `~/.gemini/config/skills/argon/extension` |
+| Windows | `%USERPROFILE%\.gemini\config\skills\argon\extension` |
+
+> [!NOTE]
+> การกด **Load unpacked** ครั้งแรกต้องทำในเบราว์เซอร์เอง
+> Installer ไม่ติดตั้ง extension โดยข้ามขั้นตอนอนุญาตของเบราว์เซอร์
+> เก็บโฟลเดอร์ติดตั้งไว้ เพราะ unpacked extension อ่านไฟล์จากตำแหน่งนี้
+
+### 4. ตรวจสถานะและเริ่มถาม
+
+เปิด Terminal ใหม่หาก shell ปัจจุบันยังไม่รู้จัก `argon`
+
+```sh
+argon --status
+argon "อธิบายวงจรน้ำเป็นภาษาไทย"
+```
+
+ตรวจผลจาก `argon --status`:
+
+| Field | ความหมาย |
+| :--- | :--- |
+| `server: "ready"` | Local server ตอบสนองแล้ว |
+| `extensionConnected: true` | มี extension ติดต่อกับ server ล่าสุด |
+| `ready: true` | Extension รายงานว่ามีแท็บ Gemini พร้อมรับงาน |
+| `modelVerified: false` | ยังไม่ได้ยืนยัน internal model ID |
+
+**ครั้งถัดไป เริ่ม bridge และเปิด Gemini ด้วยคำสั่งเดียว:**
 
 ```sh
 argon --start
 ```
 
-เปิด bridge และ Gemini ด้วยคำสั่งเดียว แล้วส่งคำถาม:
+## Usage
+
+### ถามจาก Terminal
 
 ```sh
-argon "อธิบาย SSE พร้อมตัวอย่าง"
-argon --new "เริ่มบทสนทนาใหม่"
-cat app.py | argon "รีวิวโค้ดนี้"
-argon -f notes.md "สรุป"
-argon --status
-argon --doctor
-argon --no-stream "รอคำตอบครบแล้วค่อยแสดง"
-argon --json "แสดงผลแบบ JSON"
+# สนทนาต่อในแท็บเดิม
+argon "ช่วยอธิบาย Server-Sent Events พร้อมตัวอย่าง"
+
+# เปิด conversation ใหม่ก่อนส่ง
+argon --new "ออกแบบ REST API สำหรับระบบจองห้องประชุม"
+
+# ส่ง source code ผ่าน stdin
+cat app.py | argon "รีวิวโค้ดนี้และชี้จุดที่ควรแก้"
+
+# แนบไฟล์ข้อความหลายไฟล์
+argon -f requirements.md -f schema.sql "ตรวจความสอดคล้องของ requirements กับ schema"
+
+# เลือกแท็บจาก ID หรือส่วนหนึ่งของชื่อแท็บ
+argon --tabs
+argon --tab work "สรุปสิ่งที่คุยกันใน conversation นี้"
+
+# รับผลลัพธ์ JSON เมื่อคำตอบครบ
+argon --json "สรุปข้อดีและข้อจำกัดของ SQLite"
 ```
 
-สตรีมเปิดเป็นค่าเริ่มต้น อ่านการเปลี่ยนแปลง DOM ประมาณทุก 100 ms และ flush ข้อความเมื่อพบ whitespace
-จึงเป็นข้อความจากหน้าเว็บ ไม่ใช่ token stream โดยตรงจากโมเดล และจะเริ่มได้เมื่อเว็บแสดงเนื้อคำตอบแล้ว
-เว็บอาจเปลี่ยนโครงสร้าง DOM จนต้องอัปเดต selector; ใช้ `argon --doctor` ช่วยตรวจ
+`--file` และ stdin จะถูกอ่านเป็นข้อความแล้วรวมใน prompt
+ไม่ได้อัปโหลดไฟล์แนบผ่าน UI ของ Gemini และไม่รองรับไฟล์ภาพหรือไฟล์ binary ด้วยวิธีนี้
 
-บน macOS เริ่ม server อัตโนมัติเมื่อ login ได้ด้วย `argon --install-service`
-บน Linux/Windows server เปิดแบบ background เมื่อเรียก CLI; การเริ่มอัตโนมัติเมื่อ login ยังไม่มี installer ให้
+### คำสั่งที่ใช้บ่อย
 
-## Antigravity / MCP
+| คำสั่ง / option | การทำงาน |
+| :--- | :--- |
+| `--start` | เริ่ม server ถ้ายังไม่รัน และเปิด Gemini |
+| `--setup` | เปิดหน้า extension setup และ Gemini อีกครั้ง |
+| `--status` | แสดงสถานะ server, extension และแท็บ |
+| `--doctor` | ตรวจ editor, ปุ่มส่ง และปุ่ม Stop บนหน้าเว็บ |
+| `--new`, `-n` | เปิด conversation ใหม่ก่อนส่ง prompt |
+| `--file PATH`, `-f PATH` | เพิ่มไฟล์ข้อความใน prompt; ระบุซ้ำได้ |
+| `--tab ID_OR_TITLE` | เลือกแท็บด้วย ID หรือชื่อบางส่วน |
+| `--force` | เก็บ draft ชั่วคราว ส่ง prompt แล้วคืน draft เดิม |
+| `--no-stream` | รอคำตอบครบก่อนแสดง |
+| `--json` | แสดง job result เป็น JSON โดยไม่พิมพ์ partial text |
+| `--no-spinner` | ปิด animation ใน Terminal |
+| `--history 10 --grep TEXT` | ค้นประวัติงานล่าสุด |
+| `--timeout SECONDS` | กำหนดเวลารอฝั่ง CLI; ค่าเริ่มต้น 190 วินาที |
+| `--mcp-config` | แสดง configuration สำหรับ MCP client |
 
-Installer วางสกิล `argon` ที่ `~/.gemini/config/skills/argon/SKILL.md`
-เปิด session ใหม่หรือ reload skills ใน Antigravity แล้วใช้ `/argon คำถาม`
-การจดจำ slash command ขึ้นกับ agent client ที่ใช้งาน
+ดู options ทั้งหมดด้วย `argon --help`
+
+### Streaming ทำงานอย่างไร
+
+Extension อ่านเนื้อคำตอบที่แสดงบนหน้าเว็บประมาณทุก **100 ms**
+แล้วส่ง partial text กลับ bridge ส่วน CLI ตรวจอัปเดตประมาณทุก **100 ms**
+และ flush ข้อความแต่ละช่วงเมื่อพบ whitespace เช่น space, tab หรือ newline
+ส่วนท้ายที่ยังไม่พบตัวคั่นจะถูกส่งเมื่อมีข้อความเพิ่มหรือเมื่องานจบ
+
+- เริ่มสตรีมได้เมื่อเว็บแสดง **เนื้อคำตอบ** แล้ว; ช่วง thinking ที่ยังไม่มีคำตอบจึงอาจเงียบ
+- นี่คือ DOM streaming ไม่ใช่ token stream โดยตรงจากโมเดล จังหวะขึ้นกับการ render ของเว็บ
+- หากข้อความยาวไม่มี whitespace อาจต้องรอจนพบตัวคั่นหรือจนงานจบ
+- หากเว็บย้อนแก้ส่วนที่ CLI พิมพ์แล้ว CLI อาจพัก partial output และส่งคำตอบฉบับเต็มเมื่อจบ
+- โปรแกรมที่ครอบ CLI อาจ buffer stdout เพิ่ม แม้ Argon จะ flush แล้ว
+- เมื่อพบ ancestor process ชื่อ `agy` ที่มี TTY บน macOS/Linux ระบบจะส่งข้อความเข้า TTY นั้นด้วย; GUI/headless session ไม่มี TTY ให้ส่งตรง
+
+## Integrations
+
+### Antigravity skill
+
+Installer วาง [SKILL.md](SKILL.md) ที่ `~/.gemini/config/skills/argon/SKILL.md`
+เปิด session ใหม่หรือ reload skills ใน client แล้วเรียก:
+
+```text
+/argon อธิบาย SSE พร้อมตัวอย่าง
+/argon --status
+```
+
+การค้นพบ skill และการแสดง slash command ขึ้นกับ agent client
+หาก client ไม่แสดง `/argon` ให้เรียก `argon` ผ่าน Terminal หรือใช้ MCP
+
+### MCP
 
 ```sh
 argon --mcp-config
 ```
 
-คำสั่งนี้แสดง configuration สำหรับ MCP client: `ask_gemini`, `argon_status`, `argon_history`
-ยังมี OpenAI-compatible endpoint ที่ `http://127.0.0.1:8989/v1/chat/completions` พร้อม streaming
-ดูรายละเอียด CLI และ API ใน [SKILL.md](SKILL.md)
+คัดลอก JSON object ที่คำสั่งแสดงเข้า configuration ของ MCP client
+คำสั่งจะระบุ absolute path ของ Node และ `mcp/server.mjs` สำหรับเครื่องที่ติดตั้งแล้ว
 
-## ติดตั้งจาก source / อัปเดต
+| Tool | หน้าที่ |
+| :--- | :--- |
+| `ask_gemini` | ส่ง prompt; รองรับ `new_chat`, `tab` และ `timeout_s` |
+| `argon_status` | อ่านสถานะการเชื่อมต่อ |
+| `argon_history` | อ่านประวัติ; รองรับ `limit` และ `q` |
+
+**MCP tool `ask_gemini` ส่งผลลัพธ์เมื่อคำตอบเสร็จ**
+หากต้องการ partial text ระหว่างตอบ ให้ใช้ CLI หรือ streaming Chat Completions endpoint
+
+### Chat Completions API
+
+- Base URL: `http://127.0.0.1:8989/v1`
+- Model alias: `gemini-web`
+- Authentication: `Authorization: Bearer <ค่าจาก bridge/token>`
+
+ตัวอย่าง Python standard library สำหรับรับ SSE โดยอ่าน token จากไฟล์ในเครื่อง:
+
+```python
+import json
+from pathlib import Path
+from urllib.request import Request, urlopen
+
+root = Path.home() / ".gemini/config/skills/argon"
+token = (root / "bridge/token").read_text().strip()
+
+request = Request(
+    "http://127.0.0.1:8989/v1/chat/completions",
+    data=json.dumps({
+        "model": "gemini-web",
+        "messages": [{"role": "user", "content": "อธิบาย SSE เป็นภาษาไทย"}],
+        "stream": True,
+        "argon_new_chat": True,
+    }).encode("utf-8"),
+    headers={
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    },
+)
+
+with urlopen(request, timeout=200) as response:
+    for line in response:
+        print(line.decode("utf-8"), end="", flush=True)
+```
+
+Endpoint รองรับรูปแบบ Chat Completions บางส่วน:
+
+- รองรับ text messages, `stream` และ options `argon_new_chat`, `argon_tab`, `argon_force`
+- `model` เป็น alias ใน response; **ไม่เปลี่ยนโมเดลที่เลือกในหน้าเว็บ**
+- หลาย messages จะถูกแปลงรวมเป็น prompt เดียว ไม่ใช่ model conversation roles ที่แยกจากกัน
+- ไม่รองรับ tool calling, structured-output guarantees หรือ multimodal input
+- ไม่ได้วัด token usage; ค่า usage ใน non-streaming response เป็น `0`
+
+<details>
+<summary><strong>HTTP endpoint reference</strong></summary>
+
+ทุก endpoint ต้องใช้ bearer token ยกเว้น `GET /health`
+
+| Method | Endpoint | หน้าที่ |
+| :--- | :--- | :--- |
+| `GET` | `/health` | สถานะ server และสถานะล่าสุดจาก extension |
+| `POST` | `/ask` | สร้าง job จาก `prompt` และ `options`; คืน `202` พร้อม job ID |
+| `GET` | `/jobs/:id` | อ่านสถานะ, partial text และผลลัพธ์ |
+| `POST` | `/jobs/:id/cancel` | ยกเลิกเฉพาะงานที่ยังไม่ส่งไป Gemini |
+| `POST` | `/doctor` | สร้างงานตรวจ selectors |
+| `GET` | `/history?limit=10&q=TEXT` | อ่านประวัติและค้นข้อความ |
+| `GET` | `/v1/models` | แสดง alias `gemini-web` |
+| `POST` | `/v1/chat/completions` | Chat Completions; รองรับ SSE เมื่อ `stream: true` |
+| `GET` | `/events` | SSE แจ้งว่ามีงานให้ extension ตรวจ |
+| `GET` | `/api/pending_task` | Extension รายงานสถานะและรับงานผ่าน polling |
+| `POST` | `/jobs/:id/progress` | Extension ส่ง phase และ partial text พร้อม claim token |
+| `POST` | `/jobs/:id/response` | Extension ส่งคำตอบหรือ error พร้อม claim token |
+
+`/events` ใช้แจ้งงาน ไม่ใช่ช่องสตรีมคำตอบสำหรับ API client
+
+</details>
+
+## How it works
+
+```mermaid
+flowchart LR
+    CLI["Terminal / Antigravity"] --> Bridge["Local Bridge<br/>127.0.0.1:8989"]
+    MCP["MCP client"] --> Adapter["MCP stdio adapter"]
+    Adapter --> Bridge
+    API["Chat Completions client"] --> Bridge
+    Bridge -->|"SSE notification + polling fallback"| Extension["Chrome / Brave extension"]
+    Extension -->|"Content script"| Gemini["Signed-in Gemini tab"]
+    Gemini -->|"Visible response text"| Extension
+    Extension -->|"Progress snapshots + final result"| Bridge
+    Bridge -->|"Partial text / completed response"| CLI
+    Bridge -->|"SSE / JSON"| API
+```
+
+1. **Submit** — CLI หรือ API สร้าง job; bridge จัดคิวให้ทำทีละงาน
+2. **Dispatch** — Extension ตรวจงานผ่าน SSE และ polling สำรอง แล้วรับงานพร้อม claim token
+3. **Interact** — Content script ใส่ prompt ใน editor ของ Gemini กดส่ง และอ่านคำตอบจาก DOM
+4. **Stream** — Partial snapshots กลับเข้า bridge ให้ CLI/API อ่านระหว่างงาน
+5. **Complete** — เมื่อเว็บหยุดตอบและข้อความนิ่ง ระบบบันทึกคำตอบฉบับสุดท้าย
+
+Queue ที่ยังไม่ส่งจะถูกบันทึกในเครื่องและกู้คืนได้เมื่อ server restart
+งานที่ส่งไปแล้วจะถูกรายงานเป็น error หลัง server restart เพื่อไม่ส่ง prompt ซ้ำโดยอัตโนมัติ
+SSE และ polling ช่วยให้กลับมารับงานหลัง service worker ตื่นได้ แต่ยังต้องเปิด browser/profile ที่โหลด extension ไว้
+
+### ขอบเขตการทำงาน
+
+| รายการ | ค่า / พฤติกรรมปัจจุบัน |
+| :--- | :--- |
+| Bind address | `127.0.0.1:8989` |
+| งานพร้อมกัน | 1 งานต่อ bridge |
+| งาน queued + running สูงสุด | 50 |
+| Prompt สูงสุด | 100,000 characters หลังรวมข้อความ |
+| Server job deadline | 180 วินาที รวมเวลารอคิว |
+| CLI wait timeout | 190 วินาทีเริ่มต้น; ปรับด้วย `--timeout` |
+| ยกเลิกงาน | ยกเลิกได้ก่อน dispatch; งานที่เริ่มในเว็บแล้วเรียกคืนผ่าน bridge ไม่ได้ |
+| ประวัติ | เก็บเป็น JSONL; rotate เมื่อขนาดเกินประมาณ 5 MiB |
+
+การเพิ่ม `--timeout` ไม่ได้เพิ่ม server job deadline
+
+## Installation options
+
+### ติดตั้งจาก source
 
 ```sh
 git clone https://github.com/TheerasakPing/gemini-argon-web-bridge.git
@@ -80,44 +332,169 @@ cd gemini-argon-web-bridge
 python3 scripts/install.py
 ```
 
-อัปเดตโดยรันคำสั่งติดตั้งเดิมอีกครั้ง เก็บ token และประวัติเดิม
-จากนั้น Reload extension และรีเฟรช Gemini เพื่อโหลด content script ใหม่
-ถ้า server เดิมยังรันอยู่ ให้ restart server เพื่อโหลดโค้ดใหม่
+บน Windows ใช้ `py -3 scripts/install.py` ได้หากติดตั้ง Python Launcher
 
-ตัวเลือก installer:
+| Installer option | การทำงาน |
+| :--- | :--- |
+| `--no-start` | ติดตั้งไฟล์โดยไม่เริ่ม server หรือเปิด browser |
+| `--no-open` | เริ่ม server และแสดงสถานะ โดยไม่เปิด browser |
+| `--no-path` | ไม่แก้ shell profile หรือ User PATH |
+
+บน macOS/Linux installer เพิ่ม PATH ใน `.zshrc`, `.bashrc` หรือ `.profile` ตาม shell
+บน Windows เพิ่มใน User PATH และ bootstrap `install.ps1` จะเพิ่ม PATH ให้ session ที่รันด้วย
+
+### เลือกโฟลเดอร์ติดตั้งเอง
 
 ```sh
-python3 scripts/install.py --no-start   # ติดตั้งไฟล์อย่างเดียว
-python3 scripts/install.py --no-open    # เริ่ม server โดยไม่เปิด browser
-python3 scripts/install.py --no-path    # ไม่แก้ shell profile / User PATH
+ARGON_INSTALL_DIR="$HOME/.local/share/argon" python3 scripts/install.py
 ```
 
-ค่าเริ่มต้นติดตั้งที่ `~/.gemini/config/skills/argon` และ launcher ที่ `~/.local/bin`
-ตั้ง `ARGON_INSTALL_DIR` เพื่อใช้โฟลเดอร์อื่นได้; ถ้ามี symlink เดิมจะใช้ปลายทางเดิม
+Installer จะเชื่อมตำแหน่ง skill มายังโฟลเดอร์ที่เลือก
+บน Unix ใช้ symlink; บน Windows ใช้ directory junction
+หากมี skill อยู่คนละตำแหน่งแล้ว installer จะหยุดเพื่อให้เลือกปลายทางให้ตรงกัน
+ไม่ย้ายหรือลบ installation เดิมให้โดยอัตโนมัติ
 
-## ข้อมูลส่วนตัว
+### เริ่มอัตโนมัติเมื่อ login
 
-Server ฟังเฉพาะ `127.0.0.1:8989` และใช้ bearer token สำหรับงาน
-Installer สร้าง `bridge/token` และ `extension/config.js` ในเครื่อง ไม่รวมไว้ใน repo
-`bridge/history.jsonl`, `bridge/queue.json` และ logs อาจมีคำถามและคำตอบ อย่าแชร์โฟลเดอร์ติดตั้งทั้งชุด
-ห้ามแชร์ extension ที่ผ่าน installer แล้วโดยไม่ลบ `config.js` เพราะมี token
+**macOS / launchd**
 
-## ทดสอบ
+```sh
+argon --install-service
+```
+
+- Service label: `com.argon.bridge`
+- Log: `~/Library/Logs/argon-bridge.log`
+
+Linux และ Windows เริ่ม server แบบ background เมื่อใช้ CLI
+ยังไม่มี installer สำหรับ systemd หรือ Windows login service
+
+## Updates
+
+1. รันคำสั่งติดตั้งเดิมอีกครั้ง หรืออัปเดต source แล้วรัน `python3 scripts/install.py`
+2. ที่หน้า extensions กด **Reload** บนการ์ด Argon แล้วรีเฟรชแท็บ Gemini
+3. Restart bridge ที่รันอยู่เพื่อโหลด server code ใหม่ แล้วตรวจด้วย `argon --status` และ `argon --doctor`
+
+ถ้าใช้ launchd บน macOS ให้ restart ด้วย:
+
+```sh
+launchctl kickstart -k "gui/$(id -u)/com.argon.bridge"
+```
+
+หากไม่ได้ใช้ launchd ให้หยุด process bridge เดิมผ่าน process manager ที่ใช้งาน แล้วเรียก `argon --start`
+อัปเดตขณะไม่มี job ทำงาน และเก็บ token เดิมไว้เพื่อให้ server กับ extension ยังจับคู่กัน
+
+## Privacy & security
+
+- **Local transport** — Bridge รับฟังเฉพาะ loopback และตรวจ Host/Origin พร้อม bearer authentication สำหรับ endpoint ที่รับงานหรืออ่านข้อมูล
+- **Per-install token** — Installer สร้าง token เฉพาะเครื่องใน `bridge/token` และ `extension/config.js`; อัปเดตซ้ำจะใช้ token เดิม
+- **Browser session** — ใช้ session ที่ล็อกอินในเบราว์เซอร์ ไม่ต้องส่ง Google password หรือ cookie ให้ CLI
+- **Conversation data** — คำถามและคำตอบถูกส่งให้ Gemini และอาจถูกบันทึกทั้งใน conversation ของ Google และประวัติ bridge ในเครื่อง
+- **Local files** — ไฟล์ข้อความที่ส่งด้วย `-f` หรือ stdin จะกลายเป็นส่วนหนึ่งของ prompt
+- **Health visibility** — `GET /health` ไม่ต้องใช้ token และมีชื่อแท็บบางส่วนกับสถานะล่าสุด จึงไม่ควรนำ port นี้ไปเปิดสาธารณะ
+
+| ไฟล์ | เนื้อหา |
+| :--- | :--- |
+| `bridge/token` | Bearer token สำหรับ client |
+| `extension/config.js` | Token สำหรับ extension |
+| `bridge/history.jsonl` และ `.1` | ประวัติคำถาม คำตอบ และข้อมูล job |
+| `bridge/queue.json` | งานที่ยังไม่เสร็จ; อาจมี prompt และ partial text |
+| `bridge/server.log` | Log เมื่อ CLI เริ่ม server |
+
+ไฟล์ runtime เหล่านี้ไม่รวมใน source repository
+**อย่าแชร์โฟลเดอร์ติดตั้งหรือ extension ที่ผ่าน installer แล้วทั้งชุด** เพราะมี token และอาจมีประวัติส่วนตัว
+หากต้องการแจกจ่าย ให้แชร์ repository หรือ source archive แล้วให้แต่ละเครื่องรัน installer เอง
+
+## Troubleshooting
+
+| อาการ | ตรวจ / แก้ไข |
+| :--- | :--- |
+| `argon: command not found` | เปิด Terminal ใหม่ หรือใช้ fallback command ด้านล่าง |
+| `extensionConnected: false` | ตรวจว่า extension โหลดอยู่ใน browser/profile ที่เปิด และไม่มี error บนการ์ด |
+| `ready: false` | เปิด Gemini, ล็อกอิน, รอคำตอบเดิมจบ และเคลียร์ draft |
+| `Unauthorized` | Server กับ extension อาจใช้ token คนละชุด; ใช้ installation เดียวกัน แล้ว Reload extension และ restart bridge |
+| สถานะค้าง busy ทั้งที่เว็บว่าง | รัน `argon --doctor`; Reload extension แล้วรีเฟรช Gemini เพื่อโหลด content script ปัจจุบัน |
+| ยังไม่เห็นข้อความระหว่างตอบ | ดูว่าเว็บแสดงเนื้อคำตอบแล้วหรือยัง ตรวจ `--json` / `--no-stream` และการ buffer ของโปรแกรมที่ครอบ CLI |
+| ใช้ MCP แล้วเห็นคำตอบทีเดียว | เป็นพฤติกรรมของ `ask_gemini`; ใช้ CLI หรือ streaming API หากต้องการ partial text |
+| ข้อความบางส่วนขาดหาย | Google อาจเปลี่ยน DOM หรือรูปแบบคำตอบ; เก็บผล `--doctor` และแจ้ง issue โดยลบข้อมูลส่วนตัว |
+| `Port 8989 is occupied` | ตรวจ process ที่ฟัง port; ปิดเฉพาะ instance ที่ยืนยันแล้วว่าเป็นตัวที่ไม่ต้องการ |
+| Job timeout | เปิด Gemini ดูก่อนส่งซ้ำ เพราะ prompt อาจถูกส่งไปแล้ว |
+| โหลด extension จาก source แล้วไม่มี `config.js` | รัน installer ก่อน แล้วโหลดโฟลเดอร์ extension จาก **installation path** ที่ installer แสดง |
+
+Fallback หาก PATH ยังไม่พร้อม:
+
+```sh
+python3 "$HOME/.gemini/config/skills/argon/scripts/gemini_argon_bridge.py" --status
+```
+
+Windows:
+
+```powershell
+py -3 "$HOME\.gemini\config\skills\argon\scripts\gemini_argon_bridge.py" --status
+```
+
+> [!TIP]
+> ปุ่ม Send หรือ Stop อาจไม่แสดงขณะ idle ตามพฤติกรรมหน้าเว็บ
+> จึงไม่ควรตัดสินว่าระบบเสียจากผล `--doctor` ของสองปุ่มนี้เพียงอย่างเดียว
+
+ยังแก้ไม่ได้? เปิด [GitHub issue](https://github.com/TheerasakPing/gemini-argon-web-bridge/issues)
+พร้อม OS, browser version, extension version, อาการ และผล `argon --status` / `argon --doctor` ที่ลบข้อมูลส่วนตัวแล้ว
+ไม่แนบ token, `config.js` หรือประวัติ conversation
+
+## Development
+
+```text
+gemini-argon-web-bridge/
+├── bridge/server.mjs              # HTTP server, queue, history, SSE
+├── extension/                     # Manifest V3, worker, content script, popup
+├── scripts/
+│   ├── gemini_argon_bridge.py     # CLI, live output, lifecycle helpers
+│   └── install.py                 # Installer และ token pairing
+├── mcp/server.mjs                 # MCP stdio adapter
+├── bin/                           # Shell / Windows launchers
+├── tests/                         # Bridge, DOM fixtures, CLI และ installer tests
+├── install.sh                     # Bootstrap สำหรับ macOS/Linux
+├── install.ps1                    # Bootstrap สำหรับ PowerShell
+└── SKILL.md                       # คำแนะนำสำหรับ agent client
+```
+
+รันจาก source checkout:
 
 ```sh
 node --test tests/*.test.mjs
 python3 -m unittest discover -s tests -p 'test_*.py'
+sh -n install.sh
 ```
 
-ชุดทดสอบใช้ bridge และ browser fixtures ไม่ต้องล็อกอิน Google
-การทดสอบ UI กับ Brave จริงยังต้องมี session และ extension ที่โหลดแล้ว
-PTY tests ใช้ได้บน macOS/Linux; Windows จะข้ามส่วน PTY
+CI รันบน Ubuntu และ macOS ด้วย Node.js 20 และ Python 3.9
+ชุดทดสอบครอบคลุม queue/authentication, SSE/polling, partial output timing, DOM extraction,
+MCP handshake และการติดตั้งใน HOME จำลองที่มีช่องว่างใน path
+PTY tests ใช้บน Unix และข้ามเมื่อไม่มีโมดูล `pty`
 
-## ถอนติดตั้ง
+**ขอบเขต validation:** Automated tests ใช้ browser fixtures
+ไม่ได้รับรองว่า Google DOM ทุกเวอร์ชันทำงานได้
+การทดสอบกับ Brave/Gemini จริงต้องมี extension และ session ที่ล็อกอิน
+ส่วน Windows installer มีให้ใช้งาน แต่ยังไม่ได้ทดสอบใน CI ของ repo นี้
 
-ถ้าเคยติดตั้ง launchd ให้รัน `argon --uninstall-service` ก่อน
-หยุด process bridge ที่ฟังพอร์ต 8989 จากนั้นลบโฟลเดอร์ติดตั้งและ launcher `~/.local/bin/argon*`
-เอาบรรทัด `# argon-web-bridge` ออกจาก shell profile ถ้าต้องการ
-การลบโฟลเดอร์ติดตั้งจะลบประวัติคำถามคำตอบด้วย
+### Contributing
 
-MIT License
+ก่อนส่ง pull request ให้รันชุดทดสอบ และเพิ่ม regression test เมื่อแก้พฤติกรรมที่ทำให้เกิด bug
+อธิบาย browser/DOM ที่เกี่ยวข้องโดยไม่แนบข้อมูลบัญชีหรือ conversation ส่วนตัว
+การแก้ selector ควรตรวจทั้ง partial text และคำตอบสุดท้าย เพื่อป้องกันข้อความขาดหรือซ้ำ
+
+## Uninstall
+
+1. หากเปิด login service บน macOS ให้รัน `argon --uninstall-service`
+2. หยุด process bridge ที่ยืนยันแล้วว่าฟัง `127.0.0.1:8989`
+3. Remove extension จาก browser แล้วสำรองประวัติที่ต้องการเก็บ
+4. ลบ installation directory และ launcher `argon`, `argon.cmd`, `argon.ps1` ใน `~/.local/bin`
+5. เอาบรรทัดที่มี `# argon-web-bridge` ออกจาก shell profile หรือเอา PATH ที่ installer เพิ่มให้ออกจาก Windows User PATH หากไม่ต้องการใช้อีก
+
+หากใช้ symlink/junction ให้ตรวจปลายทางก่อนลบ
+**การลบ installation directory จะลบ token และประวัติในเครื่องด้วย**
+
+## License
+
+[MIT](LICENSE) © 2026 TheerasakPing
+
+โครงการอิสระ ไม่ใช่ผลิตภัณฑ์ทางการของ Google
+Gemini และ Chrome เป็นเครื่องหมายการค้าของเจ้าของที่เกี่ยวข้อง
