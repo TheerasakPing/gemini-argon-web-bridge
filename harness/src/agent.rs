@@ -55,6 +55,13 @@ pub fn emit(session: &Session, kind: &str, data: Value, json_mode: bool) -> Resu
                 } else {
                     println!("\n{}", terminal_text(data["text"].as_str().unwrap_or("")));
                 }
+                let failed = data["unexecuted_mutations"].as_u64().unwrap_or(0);
+                if failed > 0 {
+                    eprintln!(
+                        "\n[คำเตือน] มี {failed} การแก้ไฟล์/รันคำสั่งที่ไม่ได้ทำจริง (ถูกปฏิเสธหรือล้มเหลว) และไม่มีที่สำเร็จ \
+                         คำตอบข้างต้นอาจอ้างว่าทำเสร็จโดยไม่มีหลักฐาน ตรวจไฟล์เองก่อนเชื่อ"
+                    );
+                }
             }
             "tool_started" => {
                 eprintln!("\n[tool] {}", data["name"].as_str().unwrap_or(""));
@@ -301,7 +308,8 @@ pub fn run(
             emit(
                 session,
                 "final",
-                json!({"text":text,"already_displayed":visible.trim()==text.trim()}),
+                json!({"text":text,"already_displayed":visible.trim()==text.trim(),
+                       "unexecuted_mutations":unexecuted_mutations(&session.state.calls)}),
                 limits.json,
             )?;
             return Ok(());
@@ -460,4 +468,52 @@ pub fn run(
         limits.json,
     )?;
     anyhow::bail!("Model turn budget reached; resume the saved session to continue")
+}
+
+/// Count of failed mutating calls when none succeeded; a final answer then cannot claim edits or runs.
+fn unexecuted_mutations(calls: &std::collections::BTreeMap<String, Value>) -> u64 {
+    let (mut failed, mut ok) = (0, 0);
+    for call in calls.values() {
+        if matches!(
+            call["action"]["type"].as_str(),
+            Some("create_file" | "edit_file" | "run_command")
+        ) {
+            if call["result"]["status"] == "success" {
+                ok += 1;
+            } else {
+                failed += 1;
+            }
+        }
+    }
+    if ok == 0 {
+        failed
+    } else {
+        0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn call(kind: &str, status: &str) -> Value {
+        json!({"action":{"type":kind},"result":{"status":status}})
+    }
+
+    #[test]
+    fn counts_failed_mutations_when_none_succeeded() {
+        let mut calls = std::collections::BTreeMap::new();
+        calls.insert("a".to_string(), call("edit_file", "error"));
+        calls.insert("b".to_string(), call("run_command", "error"));
+        calls.insert("c".to_string(), call("read_file", "error"));
+        assert_eq!(unexecuted_mutations(&calls), 2);
+    }
+
+    #[test]
+    fn reports_zero_when_any_mutation_succeeded() {
+        let mut calls = std::collections::BTreeMap::new();
+        calls.insert("a".to_string(), call("edit_file", "error"));
+        calls.insert("b".to_string(), call("create_file", "success"));
+        assert_eq!(unexecuted_mutations(&calls), 0);
+    }
 }
