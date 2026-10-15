@@ -28,7 +28,7 @@ def write_private(path, text):
     path.chmod(0o600)
 
 
-def install(*, home, destination, bin_dir, update_path=True):
+def install(*, home, destination, bin_dir, update_path=True, harness_binary=None):
     skill = home / '.gemini/config/skills/argon'
     # Existing symlinks are respected, including installations on another volume.
     destination = destination.resolve()
@@ -49,6 +49,14 @@ def install(*, home, destination, bin_dir, update_path=True):
         target.parent.mkdir(parents=True, exist_ok=True)
         if (SOURCE / name).resolve() != target.resolve():
             shutil.copy2(SOURCE / name, target)
+    binary_name = 'argon-harness.exe' if os.name == 'nt' else 'argon-harness'
+    if harness_binary is not None:
+        harness_target = destination / 'bin' / binary_name
+        harness_target.parent.mkdir(parents=True, exist_ok=True)
+        # Replace atomically so an already running process can finish on its old binary.
+        pending = harness_target.with_suffix('.pending')
+        shutil.copy2(harness_binary, pending)
+        pending.replace(harness_target)
 
     token_file = destination / 'bridge/token'
     if token_file.exists():
@@ -98,6 +106,7 @@ def main():
     parser.add_argument('--no-start', action='store_true', help='Install files without starting the bridge or opening the browser')
     parser.add_argument('--no-open', action='store_true', help='Start the bridge without opening browser windows')
     parser.add_argument('--no-path', action='store_true', help='Do not change shell profiles or user PATH')
+    parser.add_argument('--with-harness', action='store_true', help='Build and install the experimental Rust agent (requires Cargo)')
     args = parser.parse_args()
     if sys.version_info < (3, 9):
         raise RuntimeError('Python 3.9+ is required.')
@@ -107,9 +116,21 @@ def main():
     major = int(subprocess.check_output([node, '-p', 'process.versions.node.split(".")[0]'], text=True).strip())
     if major < 20:
         raise RuntimeError('Node.js 20+ is required.')
+    harness_binary = None
+    if args.with_harness:
+        cargo = shutil.which('cargo')
+        if not cargo:
+            raise RuntimeError('Cargo is required for --with-harness. Install Rust first.')
+        manifest = SOURCE / 'harness/Cargo.toml'
+        if not manifest.is_file():
+            raise RuntimeError('Rust harness source is missing; install from a full repository checkout.')
+        subprocess.run([cargo, 'build', '--release', '--locked', '--manifest-path', str(manifest)], check=True)
+        binary_name = 'argon-harness.exe' if os.name == 'nt' else 'argon-harness'
+        harness_binary = SOURCE / 'harness/target/release' / binary_name
     home = Path.home()
     destination = Path(os.environ.get('ARGON_INSTALL_DIR', str(home / '.gemini/config/skills/argon'))).expanduser()
-    root = install(home=home, destination=destination, bin_dir=home / '.local/bin', update_path=not args.no_path)
+    root = install(home=home, destination=destination, bin_dir=home / '.local/bin',
+                   update_path=not args.no_path, harness_binary=harness_binary)
     print(f'Installed: {root}\nExtension: {root / "extension"}', flush=True)
     print('Command: argon --start (open a new terminal if PATH is not refreshed)', flush=True)
     if not args.no_start:

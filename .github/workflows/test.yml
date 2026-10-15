@@ -18,6 +18,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.9'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --manifest-path harness/Cargo.toml --check
+      - run: cargo clippy --manifest-path harness/Cargo.toml --all-targets --locked -- -D warnings
+      - run: cargo test --manifest-path harness/Cargo.toml --locked
       - run: node --test tests/*.test.mjs
       - run: python3 -m unittest discover -s tests -p 'test_*.py'
       - run: sh -n install.sh

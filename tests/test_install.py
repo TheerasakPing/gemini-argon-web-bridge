@@ -14,6 +14,22 @@ spec.loader.exec_module(installer)
 
 
 class InstallTests(unittest.TestCase):
+    def test_harness_binary_is_only_installed_when_explicitly_supplied(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            root = home / '.gemini/config/skills/argon'
+            args = dict(home=home, destination=root, bin_dir=home / '.local/bin', update_path=False)
+            installer.install(**args)
+            name = 'argon-harness.exe' if os.name == 'nt' else 'argon-harness'
+            self.assertFalse((root / 'bin' / name).exists())
+            binary = home / 'built-harness'
+            binary.write_bytes(b'fixture binary')
+            installer.install(**args, harness_binary=binary)
+            self.assertEqual((root / 'bin' / name).read_bytes(), b'fixture binary')
+            binary.write_bytes(b'stale unrequested build')
+            installer.install(**args)
+            self.assertEqual((root / 'bin' / name).read_bytes(), b'fixture binary')
+
     def test_clean_install_pairs_token_and_extension_and_keeps_existing_data_on_update(self):
         with tempfile.TemporaryDirectory(prefix='argon install ') as directory:
             home = Path(directory)

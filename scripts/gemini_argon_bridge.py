@@ -582,7 +582,9 @@ def open_browser(setup=False):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description='Send prompts to the selected model in your Gemini web tab')
+    parser = argparse.ArgumentParser(
+        description='Send prompts to the selected model in your Gemini web tab',
+        epilog='Experimental Rust commands: argon agent, argon sessions, argon resume ID, argon fork ID. Run argon agent --help.')
     parser.add_argument('prompt', nargs='*', help="prompt text; '-' inserts piped stdin")
     parser.add_argument('--status', action='store_true', help='Start server if needed and show readiness')
     parser.add_argument('--tabs', action='store_true', help='List open Gemini tabs')
@@ -613,6 +615,16 @@ def build_parser():
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] in {'agent', 'sessions', 'resume', 'fork'}:
+        binary = ROOT / 'bin' / ('argon-harness.exe' if os.name == 'nt' else 'argon-harness')
+        if not binary.is_file():
+            raise RuntimeError('Rust harness is not installed. Run: python3 scripts/install.py --with-harness')
+        if sys.argv[1] in {'agent', 'resume'} and not any(flag in sys.argv[2:] for flag in ('--help', '-h')):
+            state = ensure_server()
+            if state.get('agentProtocol') != 1:
+                raise RuntimeError('Bridge needs restart for agent protocol v1; finish current work then restart the bridge.')
+        env = dict(os.environ, ARGON_ROOT=str(ROOT))
+        return subprocess.call([str(binary), *sys.argv[1:]], env=env)
     parser = build_parser()
     args = parser.parse_args()
     if args.stream is None:

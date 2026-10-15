@@ -8,6 +8,23 @@ description: Use when the user invokes /argon or asks to send a prompt through t
 For `/argon <prompt>`, run `argon` with the prompt as one safely quoted argument.
 For `/argon --status`, run `argon --status` and report its actual readiness fields.
 The Python CLI auto-starts the loopback Node server. No npm or pip packages required.
+
+## Experimental Rust harness
+
+`argon agent "<task>"` runs a multi-turn coding harness, read-only by default.
+It lists, searches and reads project files as needed, rather than sending a fixed initial selection.
+`--allow-edit` enables approved edits/new files; `--allow-commands` additionally enables approved argv execution.
+Every mutation requires exact per-call approval in an interactive terminal; JSON/headless runs cannot approve.
+Commands run with user permissions and are not OS-sandboxed. Do not claim otherwise.
+Each model turn starts a fresh Gemini conversation in one leased tab; this changes the tab's current chat.
+Never auto-retry a pending/uncertain session. Sessions are under `~/.local/state/argon/sessions`
+(or `$XDG_STATE_HOME/argon/sessions`). `argon sessions`, `argon resume ID`, `argon fork ID --task "..."`
+manage sessions; fork does not roll back filesystem changes.
+Install the optional harness from a repository checkout with
+`python3 scripts/install.py --with-harness` (Cargo/Rust 1.89+).
+If bridge health lacks `agentProtocol: 1`, restart it after current jobs finish.
+Protocol, budgets and live-provider limitations are documented in `PLAN.md` in the source repository.
+
 Run from the user's project directory: ordinary prompts automatically select relevant local
 text files. For example, `argon "ทำความเข้าใจโปรเจคนี้จากสิ่งที่มีตอนนี้"` prioritizes
 README, dependency manifests and entrypoints. Context is a partial selection, never a full project scan.

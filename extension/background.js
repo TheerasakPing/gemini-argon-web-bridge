@@ -40,6 +40,7 @@ async function flush() {
   }
 }
 const matchTab = (tabs, wanted) => {
+  if (/^\d+$/.test(wanted)) return tabs.find(t => String(t.id) === wanted);
   const needle = wanted.toLowerCase();
   return tabs.find(t => String(t.id) === wanted) || tabs.find(t => (t.title || '').toLowerCase().includes(needle));
 };

@@ -35,11 +35,25 @@ export function createBridge({ token, timeoutMs = 180000, dataDir = null } = {})
   const jobs = new Map(), streams = new Set(), clients = new Map();
   const queueFile = dataDir && join(dataDir, 'queue.json');
   const historyFile = dataDir && join(dataDir, 'history.jsonl');
+  const leaseFile = dataDir && join(dataDir, 'agent-lease.json');
+  let lease = null;
+  if (leaseFile && existsSync(leaseFile)) {
+    try { lease = JSON.parse(readFileSync(leaseFile, 'utf8')); } catch { /* Invalid lease is not usable. */ }
+  }
   const final = j => ['done', 'error'].includes(j.status);
   const publicJob = j => ({ ...j, claimToken: undefined });
   const notify = () => { for (const s of streams) s.write('event: pending\ndata: {}\n\n'); };
   const liveClients = () => [...clients.values()].filter(c => Date.now() - c.seen < 65000);
   const openJobs = () => [...jobs.values()].filter(j => !final(j));
+  const saveLease = () => {
+    if (!leaseFile) return;
+    writeFileSync(leaseFile + '.tmp', JSON.stringify(lease), {mode:0o600});
+    renameSync(leaseFile + '.tmp', leaseFile);
+  };
+  const currentLease = () => {
+    if (lease && lease.expires < Date.now() && !openJobs().length) { lease = null; saveLease(); }
+    return lease;
+  };
 
   const persist = () => {
     if (!queueFile) return;
@@ -104,13 +118,13 @@ export function createBridge({ token, timeoutMs = 180000, dataDir = null } = {})
     if (origin && !/^chrome-extension:\/\/[a-p]{32}$/.test(origin)) return json(403, {error:'Origin denied'});
     if (origin) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Argon-Lease');
     if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
     const url = new URL(req.url, 'http://127.0.0.1');
     sweep();
     if (req.method === 'GET' && url.pathname === '/health') {
       const live = liveClients();
-      return json(200, { service:'argon-web-bridge', version:1, server:'ready', extensionConnected:live.length > 0,
+      return json(200, { service:'argon-web-bridge', version:1, agentProtocol:1, agentLeased:Boolean(currentLease()), server:'ready', extensionConnected:live.length > 0,
         ready:live.some(c => c.ready), queue:openJobs().length,
         clients:live.map(c => ({ready:c.ready, draft:c.draft, error:c.error, model:c.model, tabs:c.tabs})), modelVerified:false });
     }
@@ -127,6 +141,25 @@ export function createBridge({ token, timeoutMs = 180000, dataDir = null } = {})
           return parsed;
         } catch { throw Object.assign(new Error('Invalid JSON object'), {status:400}); }
       };
+      if (req.method === 'POST' && url.pathname === '/agent/lease') {
+        const b = await body();
+        const held = currentLease();
+        if (b.action === 'acquire') {
+          if (typeof b.session !== 'string' || !/^[\w-]{1,80}$/.test(b.session) || !Number.isSafeInteger(b.tab) || b.tab <= 0) return json(400, {error:'Valid session and tab required'});
+          if (held || openJobs().length) return json(409, {error:'Bridge is reserved or has unfinished jobs'});
+          const tabs = liveClients().flatMap(c => c.tabs || []);
+          if (!tabs.some(t => t.id === b.tab && t.ready)) return json(409, {error:'Requested Gemini tab is not ready'});
+          lease = {session:b.session, tab:b.tab, token:randomUUID(), expires:Date.now()+1800000}; saveLease();
+          return json(200, lease);
+        }
+        if (!held || req.headers['x-argon-lease'] !== held.token) return json(409, {error:'Agent lease lost'});
+        if (b.action === 'renew') { lease.expires = Date.now()+1800000; saveLease(); return json(200, {ok:true, tab:lease.tab}); }
+        if (b.action === 'release') {
+          if (openJobs().length) return json(409, {error:'Unfinished job: inspect Gemini before releasing lease'});
+          lease = null; saveLease(); return json(200, {ok:true});
+        }
+        return json(400, {error:'Unknown lease action'});
+      }
       if (req.method === 'GET' && url.pathname === '/events') {
         res.writeHead(200, {'Content-Type':'text/event-stream', Connection:'keep-alive'});
         res.write('event: pending\ndata: {}\n\n'); streams.add(res);
@@ -159,6 +192,7 @@ export function createBridge({ token, timeoutMs = 180000, dataDir = null } = {})
         return json(200, {object:'list', data:[{id:'gemini-web', object:'model', owned_by:'argon-bridge'}]});
       }
       if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
+        if (currentLease()) return json(409, {error:'Bridge reserved by an agent session'});
         const b = await body();
         const prompt = Array.isArray(b.messages) ? flatten(b.messages) : '';
         const err = (status, message, type) => json(status, {error:{message, type}});
@@ -194,6 +228,11 @@ export function createBridge({ token, timeoutMs = 180000, dataDir = null } = {})
       }
       if (req.method === 'POST' && (url.pathname === '/ask' || url.pathname === '/doctor')) {
         const b = await body();
+        const held = currentLease();
+        if (held && (req.headers['x-argon-lease'] !== held.token || url.pathname !== '/ask' || b.options?.tab !== String(held.tab) || b.options?.force === true || b.options?.newChat !== true)) {
+          return json(409, {error:'Bridge reserved: valid agent lease, exact tab and fresh chat required'});
+        }
+        if (!held && req.headers['x-argon-lease']) return json(409, {error:'Agent lease lost'});
         const isDoctor = url.pathname === '/doctor';
         if (!isDoctor && (typeof b.prompt !== 'string' || !b.prompt.trim() || b.prompt.length > MAX_PROMPT)) {
           return json(400, {error:`prompt must be 1–${MAX_PROMPT} characters`});
@@ -211,6 +250,8 @@ export function createBridge({ token, timeoutMs = 180000, dataDir = null } = {})
         if (!job) return json(404, {error:'Unknown job (server may have restarted)'});
         if (req.method === 'GET' && !action) return json(200, publicJob(job));
         if (req.method === 'POST' && action === 'cancel') {
+          const held = currentLease();
+          if (held && req.headers['x-argon-lease'] !== held.token) return json(409, {error:'Bridge reserved by an agent session'});
           if (final(job)) return json(200, {cancelled:false, status:job.status});
           if (job.status === 'running') return json(409, {error:'Job already running in Gemini; it cannot be recalled'});
           finish(job, {status:'error', error:'Cancelled before delivery'});

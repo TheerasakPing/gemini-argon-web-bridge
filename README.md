@@ -167,6 +167,68 @@ argon --json "สรุปข้อดีและข้อจำกัดขอ
 ใช้ `--no-auto` เพื่อปิดเฉพาะคำสั่ง หรือ `export ARGON_AUTO_CONTEXT=0` เพื่อปิดเป็น default
 เมื่อระบุ `-f` หรือมี stdin จะใช้ข้อมูลที่ระบุแทน auto context; ใช้ `--auto` เพื่อรวมทั้งสองแบบ
 
+### Rust agent harness (experimental)
+
+Harness เพิ่มวงจรอ่านโปรเจค เรียก tool และส่งหลักฐานกลับไปให้ Gemini ทำงานต่อ
+ออกแบบจากแนวคิด permission/hooks ของ Claude Code, evidence/resume ของ Codex,
+small core/session events ของ Pi, provider separation ของ Jcode และ stale-edit protection ของ OMP
+รายละเอียดแหล่งอ้างอิง ข้อแลกเปลี่ยน และ roadmap อยู่ใน [PLAN.md](PLAN.md)
+
+ติดตั้งจาก source checkout (ต้องมี Cargo/Rust 1.89+; ทดสอบในเครื่องด้วย Rust 1.95):
+
+```sh
+python3 scripts/install.py --with-harness --no-open
+```
+
+หรือติดตั้งจาก bootstrap โดยส่ง `--with-harness` ไปยัง installer:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/TheerasakPing/gemini-argon-web-bridge/main/install.sh | sh -s -- --with-harness --no-open
+```
+
+```sh
+# ค่าเริ่มต้นอ่านอย่างเดียว และอ่านไฟล์เพิ่มได้หลายรอบ
+argon agent "ทำความเข้าใจโปรเจคนี้ อธิบาย flow หลัก พร้อมอ้างไฟล์"
+
+# เปิดสิทธิ์เสนอแก้ไขและรัน command; แต่ละ action ยังต้องอนุมัติใน terminal
+argon agent --allow-edit --allow-commands "แก้ bug แล้วทดสอบ"
+
+# ระบุแท็บเมื่อมี Gemini พร้อมใช้งานมากกว่าหนึ่งแท็บ
+argon agent --tab 123 "สำรวจโปรเจค"
+
+# ดู session / ทำต่อเมื่อไม่มี pending intent / แตก session ใหม่แบบ read-only
+argon sessions
+argon resume SESSION_ID
+argon fork SESSION_ID --task "ลองแนวทางอื่น"
+
+# events แบบ JSONL สำหรับเชื่อมเครื่องมือ (ไม่เปิด approval แบบอัตโนมัติ)
+argon agent --json --max-turns 10 "ตรวจโครงสร้างโปรเจค"
+```
+
+- Tools: `list_files`, `read_file`, `search_text`, `edit_file`, `create_file`, `run_command`
+- Read/search ใช้ ignore rules, ข้าม hidden/sensitive/generated paths และไม่ตาม symlink
+- Edit ต้องอ่านไฟล์ก่อน ใช้ whole-file SHA-256 และ exact text anchor; create ไม่เขียนทับไฟล์เดิม
+- แสดง action/ข้อความที่จะแก้ให้อนุมัติตรงตาม arguments; ไม่ใช้ auto-approval จาก model
+- Command ใช้ argv, timeout และ process cleanup; โปรแกรมที่อนุมัติยังใช้สิทธิ์บัญชีผู้ใช้
+- stdout/stderr ของ command แสดงหลังจบและตรวจ secret แบบ bounded buffer; ข้อความ Gemini ยัง stream ระหว่างตอบ
+- Session journal เก็บใต้ `~/.local/state/argon/sessions` หรือ `$XDG_STATE_HOME/argon/sessions`
+- ค่า default: 20 model turns, 900 วินาทีรวม, prompt budget 85KB; ถึง budget จะเก็บ session และหยุด
+- บันทึก intent ก่อนส่ง prompt/ใช้ tool; resume ที่มี pending intent จะปฏิเสธการ replay
+- ทุก model turn เปิด fresh chat พร้อม bounded evidence บนแท็บที่ lease ไว้
+  ขณะถือ lease ordinary CLI/API จะส่งคำถามแทรกไม่ได้
+- Lease ต่ออายุระหว่างรอโมเดล มีอายุ 30 นาที; ถ้า process crash ให้ตรวจสถานะก่อนใช้ใหม่
+  lease ที่หมดอายุจะคืนได้เมื่อ bridge ไม่มีงานค้าง
+- Streaming เป็นข้อความ progress ที่หน้าเว็บส่งมาจริง; control JSON ซ่อนจากหน้าปกติ
+  final answer ที่อยู่ใน envelope จะแสดงหลังตรวจ protocol ผ่าน
+- ยังไม่มี OS sandbox, LSP/DAP, full-screen TUI, executable plugins, autonomous subagents,
+  interactive session tree หรือ automatic context compaction
+- รุ่นนี้เป็น experimental; automated fixtures และ live Brave verification ต้องรายงานแยกกัน
+
+ถ้าติดตั้งทับ daemon รุ่นเก่าแล้ว `argon agent` แจ้งว่า protocol ไม่พร้อม
+ให้รอ jobs จบก่อน restart daemon จากนั้นตรวจ `argon --status` ว่ามี `agentProtocol: 1`
+หลังอัปเดตเป็น extension 1.1.3 ให้ Reload ใน `brave://extensions` แล้ว refresh Gemini
+เพื่อเปิดใช้การจับ numeric tab ID แบบตรงตัว โดยไม่ fallback ไปแท็บชื่อคล้ายกัน
+
 ### คำสั่งที่ใช้บ่อย
 
 | คำสั่ง / option | การทำงาน |

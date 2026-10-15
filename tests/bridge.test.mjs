@@ -18,6 +18,40 @@ async function fixture(t, timeoutMs=180000, token='test-token', dataDir=null) {
   };
   return {call,base};
 }
+test('agent lease pins a ready tab and excludes ordinary/API jobs until released',async t=>{
+  const {call}=await fixture(t);
+  const acquire={action:'acquire',session:'session-1',tab:123};
+  assert.equal((await call('/agent/lease',acquire)).status,409);
+  await call('/api/pending_task?'+new URLSearchParams({client:'a',ready:'1',tabs:JSON.stringify([{id:123,ready:true}])}));
+  const lease=(await call('/agent/lease',acquire)).body;
+  assert.ok(lease.token);
+  assert.equal((await call('/agent/lease',acquire)).status,409);
+  assert.equal((await call('/ask',{prompt:'ordinary'})).status,409);
+  assert.equal((await call('/v1/chat/completions',{messages:[{role:'user',content:'ordinary'}]})).status,409);
+  const headers={'X-Argon-Lease':lease.token};
+  assert.equal((await call('/ask',{prompt:'wrong tab',options:{tab:'124',newChat:true}},headers)).status,409);
+  assert.equal((await call('/ask',{prompt:'old chat',options:{tab:'123'}},headers)).status,409);
+  const job=(await call('/ask',{prompt:'agent',options:{tab:'123',newChat:true}},headers)).body;
+  assert.ok(job.id);
+  assert.equal((await call(`/jobs/${job.id}/cancel`,{})).status,409);
+  assert.equal((await call('/agent/lease',{action:'release'},headers)).status,409);
+  await call(`/jobs/${job.id}/cancel`,{},headers);
+  assert.equal((await call('/agent/lease',{action:'renew'},headers)).body.tab,123);
+  assert.equal((await call('/agent/lease',{action:'release'},headers)).status,200);
+  assert.equal((await call('/ask',{prompt:'ordinary'})).status,202);
+});
+test('agent reservation survives daemon restart and requires the original lease token',async t=>{
+  const dir=mkdtempSync(join(tmpdir(),'argon-lease-'));
+  t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const first=await fixture(t,180000,'test-token',dir);
+  await first.call('/api/pending_task?'+new URLSearchParams({client:'a',ready:'1',tabs:JSON.stringify([{id:12,ready:true}])}));
+  const lease=(await first.call('/agent/lease',{action:'acquire',session:'owner',tab:12})).body;
+  const second=await fixture(t,180000,'test-token',dir);
+  assert.equal((await second.call('/health')).body.agentLeased,true);
+  assert.equal((await second.call('/ask',{prompt:'must not interleave'})).status,409);
+  assert.equal((await second.call('/agent/lease',{action:'renew'},{'X-Argon-Lease':'wrong'})).status,409);
+  assert.equal((await second.call('/agent/lease',{action:'renew'},{'X-Argon-Lease':lease.token})).body.tab,12);
+});
 function cliHome(t) {
   const root=mkdtempSync(join(tmpdir(),'argon-cli-'));
   mkdirSync(join(root,'bridge'));
