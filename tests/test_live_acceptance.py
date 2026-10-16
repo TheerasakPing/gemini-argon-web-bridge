@@ -18,7 +18,8 @@ spec.loader.exec_module(live)
 
 
 class AcceptanceGateTests(unittest.TestCase):
-    def run_fixture(self, *, buffered=False, wrong_facts=False, mutate=False, split_jobs=False, tab=None):
+    def run_fixture(self, *, buffered=False, wrong_facts=False, mutate=False,
+                    split_jobs=False, tab=None, final_stream='default'):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "results"
 
@@ -52,13 +53,47 @@ class AcceptanceGateTests(unittest.TestCase):
                 state_path = Path(argv[argv.index("--state-dir") + 1]) / "fixture"
                 state_path.mkdir(parents=True)
                 (state_path / "state.json").write_text(json.dumps(state))
-                for at_ms, text in [(1, "Reading "), (151, "source")]:
+                stream_events = {
+                    'default': [
+                        (1, final[:8], 'assistant_delta'),
+                        (51, final[8:24], 'assistant_delta'),
+                        (151, final[24:], 'assistant_delta'),
+                    ],
+                    'buffered': [],
+                    'tool_only': [(1, 'Reading source', 'assistant_delta')],
+                    'tail_missing': [
+                        (1, final[:8], 'assistant_delta'),
+                        (51, final[8:-8], 'assistant_delta'),
+                    ],
+                    'duplicate': [
+                        (1, final[:8], 'assistant_delta'),
+                        (51, final[8:], 'assistant_delta'),
+                        (151, final[-8:], 'assistant_delta'),
+                    ],
+                    'reset_exact': [
+                        (1, 'Wrong source', 'assistant_delta'),
+                        (51, final[:24], 'assistant_reset'),
+                        (151, final[24:], 'assistant_delta'),
+                    ],
+                    'reset_incomplete': [
+                        (1, 'Wrong source', 'assistant_delta'),
+                        (51, final[:24], 'assistant_reset'),
+                        (151, final[24:-8], 'assistant_delta'),
+                    ],
+                    'stale_only': [(1, 'Reading source', 'assistant_delta')],
+                }[final_stream]
+                for at_ms, text, event_type in stream_events:
                     stdout.write(json.dumps({
-                        "event": "assistant_delta", "at_ms": at_ms,
+                        "event": event_type, "at_ms": at_ms,
                         "data": {"text": text, "job_status": "done" if buffered else "running",
                                  "job_phase": "generating",
                                  "job_id": f"job-{at_ms}" if split_jobs else "job-one"},
                     }) + "\n")
+                if final_stream == 'stale_only':
+                    stdout.write(json.dumps({
+                        'event': 'tool_result', 'at_ms': 150,
+                        'data': {'status': 'success'},
+                    }) + '\n')
                 stdout.write(json.dumps({
                     "event": "final", "at_ms": 201, "data": {"text": final},
                 }) + "\n")
@@ -90,6 +125,8 @@ class AcceptanceGateTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(report["passed"])
         self.assertTrue(report["streaming_verified"])
+        self.assertTrue(report["final_stream"]["verified"])
+        self.assertTrue(report["final_stream"]["complete"])
 
     def test_forwards_explicit_tab_without_changing_acceptance(self):
         code, report = self.run_fixture(tab=1869336121)
@@ -110,6 +147,26 @@ class AcceptanceGateTests(unittest.TestCase):
         code, report = self.run_fixture(split_jobs=True)
         self.assertEqual(code, 1)
         self.assertFalse(report["streaming_verified"])
+
+    def test_final_stream_must_reconstruct_exact_final_text(self):
+        for mode in ('buffered', 'tool_only', 'tail_missing', 'duplicate',
+                     'reset_incomplete'):
+            with self.subTest(mode=mode):
+                code, report = self.run_fixture(final_stream=mode)
+                self.assertEqual(code, 1)
+                self.assertFalse(report["final_stream"]["verified"])
+
+    def test_final_stream_accepts_reset_as_replacement(self):
+        code, report = self.run_fixture(final_stream='reset_exact')
+        self.assertEqual(code, 0)
+        self.assertTrue(report["passed"])
+        self.assertEqual(report["final_stream"]["resets"], 1)
+
+    def test_final_stream_ignores_deltas_before_last_tool_barrier(self):
+        code, report = self.run_fixture(final_stream='stale_only')
+        self.assertEqual(code, 1)
+        self.assertEqual(report["final_stream"]["reason"],
+                         'missing_or_ambiguous_final_job')
 
     def test_rejects_readme_mutation_even_when_source_is_unchanged(self):
         code, report = self.run_fixture(mutate=True)

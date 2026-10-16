@@ -21,6 +21,59 @@ def health():
         return json.load(response)
 
 
+def final_stream_evidence(events):
+    """Verify that the final answer itself streamed in one owned Gemini job."""
+    final_index = next(
+        (index for index in range(len(events) - 1, -1, -1)
+         if events[index].get('event') == 'final'),
+        None,
+    )
+    if final_index is None:
+        return {'verified': False, 'reason': 'missing_final'}
+
+    final = events[final_index]
+    barrier = max(
+        [index for index, event in enumerate(events[:final_index])
+         if event.get('event') in {'tool_result', 'protocol_error'}] + [-1]
+    )
+    samples = [
+        event for event in events[barrier + 1:final_index]
+        if event.get('event') in {'assistant_delta', 'assistant_reset'}
+    ]
+    jobs = {event.get('data', {}).get('job_id') for event in samples}
+    if len(jobs) != 1 or None in jobs:
+        return {'verified': False, 'reason': 'missing_or_ambiguous_final_job'}
+
+    visible = ''
+    for event in samples:
+        text = event.get('data', {}).get('text')
+        if not isinstance(text, str):
+            return {'verified': False, 'reason': 'invalid_stream_text'}
+        visible = text if event.get('event') == 'assistant_reset' else visible + text
+
+    generating = [
+        event for event in samples
+        if event.get('event') == 'assistant_delta'
+        and event.get('data', {}).get('job_status') == 'running'
+        and event.get('data', {}).get('job_phase') == 'generating'
+        and event.get('data', {}).get('text')
+        and event.get('at_ms', 0) < final.get('at_ms', 0)
+    ]
+    span = (
+        generating[-1]['at_ms'] - generating[0]['at_ms']
+        if len(generating) >= 2 else 0
+    )
+    complete = visible == final.get('data', {}).get('text')
+    return {
+        'verified': complete and len(generating) >= 2 and span >= 100,
+        'final_job': next(iter(jobs)),
+        'complete': complete,
+        'generating_deltas': len(generating),
+        'span_ms': span,
+        'resets': sum(event.get('event') == 'assistant_reset' for event in samples),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
@@ -147,11 +200,12 @@ def main():
             if len(samples) >= 2 and samples[-1]['at_ms'] - samples[0]['at_ms'] >= 100
         ]
         streaming_verified = bool(streamed_jobs)
+        final_stream = final_stream_evidence(events)
         passed = (code == 0 and state.get('status') == 'final' and marker in final
                   and {'README.md', entrypoint} <= read_paths and len(successes) >= 3
                   and before_final and not state.get('pending')
                   and facts_correct and fixture_unchanged and listed_files
-                  and streaming_verified)
+                  and streaming_verified and final_stream['verified'])
         result = {
             'case': index, 'passed': passed, 'exit_code': code,
             'status': state.get('status'), 'turns': state.get('turns'),
@@ -160,6 +214,7 @@ def main():
             'facts_correct': facts_correct, 'fixture_unchanged': fixture_unchanged,
             'listed_files_first': listed_files,
             'streaming_verified': streaming_verified,
+            'final_stream': final_stream,
             'generating_partial_events': len(generating_partials),
             'streamed_jobs': streamed_jobs,
             'partial_events': len(partials),
