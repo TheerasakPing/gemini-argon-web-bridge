@@ -44,7 +44,7 @@ pub fn emit(session: &Session, kind: &str, data: Value, json_mode: bool) -> Resu
                 io::stdout().flush()?;
             }
             "assistant_reset" => {
-                println!(
+                print!(
                     "\n[Gemini ปรับข้อความ]\n{}",
                     terminal_text(data["text"].as_str().unwrap_or(""))
                 );
@@ -96,16 +96,26 @@ pub fn emit(session: &Session, kind: &str, data: Value, json_mode: bool) -> Resu
     Ok(())
 }
 
-/// Gemini renders markdown, so the streamed text lacks list markers the final JSON keeps.
-/// Compare letters and digits only to avoid printing the same answer twice.
-fn same_words(a: &str, b: &str) -> bool {
-    let key = |t: &str| {
-        t.chars()
-            .filter(|c| c.is_alphanumeric())
-            .collect::<String>()
-    };
-    let a = key(a);
-    !a.is_empty() && a == key(b)
+/// Ignore only surrounding whitespace; punctuation, marks and internal layout can change meaning.
+fn same_answer(a: &str, b: &str) -> bool {
+    let a = a.trim();
+    !a.is_empty() && a == b.trim()
+}
+
+#[derive(PartialEq)]
+enum StreamSource {
+    Progress,
+    Final,
+}
+
+fn streaming_text(snapshot: &str) -> (StreamSource, String) {
+    match protocol::live_final_text(snapshot) {
+        Some(text) => (StreamSource::Final, text),
+        None => (
+            StreamSource::Progress,
+            protocol::visible_prefix(snapshot).into(),
+        ),
+    }
 }
 
 fn approve(
@@ -214,6 +224,7 @@ pub fn run(
             "Session time budget reached"
         );
         let mut visible = String::new();
+        let mut visible_source = StreamSource::Progress;
         let (nonce, answer) = if let Some(saved) = recovery::saved_response(session)? {
             saved
         } else {
@@ -252,16 +263,16 @@ pub fn run(
             session.save()?;
             let remaining = Duration::from_secs(limits.seconds).saturating_sub(started.elapsed());
             let answer = bridge.wait(&job, remaining, cancelled, &mut |snapshot, status, phase| {
-                let prose = protocol::visible_prefix(snapshot);
-                // With no prose before the envelope, the answer lives in final.text; stream that as it arrives.
-                let live;
-                let prefix: &str = if prose.trim().is_empty() {
-                    live = protocol::live_final_text(snapshot).unwrap_or_default();
-                    &live
+                let (source, prefix) = streaming_text(snapshot);
+                let source_changed = source != visible_source && !visible.is_empty();
+                if source_changed || !prefix.starts_with(&visible) {
+                    emit(
+                        session,
+                        "assistant_reset",
+                        json!({"text":prefix,"job_id":job,"job_status":status,"job_phase":phase}),
+                        limits.json,
+                    )?;
                 } else {
-                    prose
-                };
-                if prefix.starts_with(&visible) {
                     let delta = &prefix[visible.len()..];
                     if !delta.is_empty() {
                         emit(
@@ -271,15 +282,9 @@ pub fn run(
                             limits.json,
                         )?;
                     }
-                } else if prefix != visible {
-                    emit(
-                        session,
-                        "assistant_reset",
-                        json!({"text":prefix,"job_id":job,"job_status":status,"job_phase":phase}),
-                        limits.json,
-                    )?;
                 }
-                visible = prefix.into();
+                visible = prefix;
+                visible_source = source;
                 Ok(())
             })?;
             session.state.pending =
@@ -330,7 +335,7 @@ pub fn run(
             emit(
                 session,
                 "final",
-                json!({"text":text,"already_displayed":same_words(&visible,text),
+                json!({"text":text,"already_displayed":same_answer(&visible,text),
                        "unexecuted_mutations":unexecuted_mutations(&session.state.calls)}),
                 limits.json,
             )?;
@@ -517,6 +522,64 @@ fn unexecuted_mutations(calls: &std::collections::BTreeMap<String, Value>) -> u6
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn final_stream_takes_priority_over_prose_before_envelope_closes() {
+        let snapshot = format!(
+            "Answer A\n{}{{\"action\":{{\"type\":\"final\",\"text\":\"Answer B",
+            protocol::BEGIN
+        );
+        let (source, text) = streaming_text(&snapshot);
+        assert!(source == StreamSource::Final);
+        assert_eq!(text, "Answer B");
+    }
+
+    #[test]
+    fn empty_final_stream_does_not_fall_back_to_prose() {
+        let snapshot = format!(
+            "Answer A\n{}{{\"action\":{{\"type\":\"final\",\"text\":\"",
+            protocol::BEGIN
+        );
+        let (source, text) = streaming_text(&snapshot);
+        assert!(source == StreamSource::Final);
+        assert_eq!(text, "");
+    }
+
+    #[test]
+    fn tool_actions_keep_streaming_progress_prose() {
+        let snapshot = format!(
+            "กำลังอ่าน\n{}{{\"action\":{{\"type\":\"read_file\",\"path\":\"README.md\"}}}}",
+            protocol::BEGIN
+        );
+        let (source, text) = streaming_text(&snapshot);
+        assert!(source == StreamSource::Progress);
+        assert_eq!(text, "กำลังอ่าน\n");
+    }
+
+    #[test]
+    fn final_deduplication_preserves_operators_and_signs() {
+        assert!(!same_answer("4+2", "4-2"));
+        assert!(!same_answer("value = 2", "value != 2"));
+        assert!(!same_answer("balance: 2", "balance: -2"));
+        assert!(!same_answer("a*b", "ab"));
+    }
+
+    #[test]
+    fn final_deduplication_preserves_thai_combining_marks() {
+        assert!(!same_answer("ปา", "ป่า"));
+        assert!(!same_answer("ป่า", "ป้า"));
+        assert!(!same_answer("ก", "กิ"));
+        assert!(same_answer("คำตอบ: ป่า", "คำตอบ: ป่า"));
+    }
+
+    #[test]
+    fn final_deduplication_only_ignores_surrounding_whitespace() {
+        assert!(same_answer("\n คำตอบ 4+2 = 6\n", "คำตอบ 4+2 = 6"));
+        assert!(!same_answer("a b", "ab"));
+        assert!(!same_answer("a  b", "a b"));
+        assert!(!same_answer("a\nb", "a b"));
+        assert!(!same_answer("   ", "\n"));
+    }
 
     fn call(kind: &str, status: &str) -> Value {
         json!({"action":{"type":kind},"result":{"status":status}})

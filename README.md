@@ -242,10 +242,14 @@ argon agent --json --max-turns 10 "ตรวจโครงสร้างโป
 - Lease ต่ออายุระหว่างรอโมเดล มีอายุ 30 นาที; ถ้า process crash ให้ตรวจสถานะก่อนใช้ใหม่
   lease ที่หมดอายุจะคืนได้เมื่อ bridge ไม่มีงานค้าง
 - Streaming เป็นข้อความ progress ที่หน้าเว็บส่งมาจริง; control JSON ซ่อนจากหน้าปกติ
-  ถ้าโมเดลเขียนคำตอบทั้งหมดไว้ใน `final.text` harness ถอดข้อความจาก JSON string ที่ยังมาไม่ครบ
+  protocol ให้คำตอบสุดท้ายอยู่ใน `final.text` แห่งเดียว ส่วน tool actions ส่ง progress prose ได้
+  harness ถอดข้อความจาก JSON string ที่ยังมาไม่ครบ
   (รวม `\uXXXX` และ surrogate pair) และพิมพ์ตามช่องว่าง ก่อน envelope จะปิด
-  ตัวตรวจว่าข้อความ "แสดงแล้ว" เทียบเฉพาะตัวอักษรและตัวเลข เพราะหน้าเว็บตัด markdown ออก
-  โมเดลบางครั้งเขียน prose กับ `final.text` ไม่ตรงกัน ทำให้พิมพ์สองชุด
+  ตัวตรวจว่าข้อความ "แสดงแล้ว" เก็บ operator, เครื่องหมายและสระ/วรรณยุกต์ไทย
+  โดยละเฉพาะ whitespace รอบนอก เมื่อพบ `final.text` ระบบเลือกแหล่งนี้เสมอแม้มี prose นำหน้า
+  และส่ง `assistant_reset` เมื่อเปลี่ยนแหล่ง JSON consumer ใช้ reset แทนข้อความเดิมได้
+  terminal ย้อนลบ progress ที่พิมพ์ไปแล้วไม่ได้ จึงแสดง `[Gemini ปรับข้อความ]` แล้วสตรีม final ต่อ
+  การทำตาม protocol ใหม่ของโมเดลยังต้องยืนยัน live
 - ยังไม่มี sandbox สำหรับ Linux/Windows, LSP/DAP, full-screen TUI, executable plugins, autonomous subagents,
   interactive session tree หรือ automatic context compaction
 - รุ่นนี้เป็น experimental; automated fixtures และ live Brave verification ต้องรายงานแยกกัน

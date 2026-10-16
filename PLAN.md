@@ -391,3 +391,25 @@ parser/provider/read loop และ opt-in editing/commands ทำแล้ว�
 - ติดตั้งด้วย `scripts/install.py --no-start --no-path` และตรวจ hash ของ content/manifest ตรง source
   `argon --status` หลังติดตั้งรายงาน extensionConnected=false, clients=[], ready=false,
   queue=0 และไม่มี lease จึงยังไม่มี live gate สำหรับ 1.1.11
+
+### Final streaming จากแหล่งเดียว — 2026-10-16
+
+- ทีมพัฒนาปรับ protocol ให้ final ตอบใน `final.text` แห่งเดียวและเริ่ม envelope ทันที
+  เพื่อลดการเขียนคำตอบซ้ำคนละแบบ; tool actions ยังส่ง progress prose ได้
+- แก้ตัวเทียบข้อความที่เดิมตัดทุกอย่างยกเว้นตัวอักษร/ตัวเลข:
+  `4+2` กับ `4-2` และคำไทยที่วรรณยุกต์ต่างกันต้องไม่ถูกถือว่าเป็นคำตอบเดียวกัน
+  รุ่นนี้ละเฉพาะ whitespace รอบนอก และรักษา layout ภายใน
+- Callback เลือก `final.text` ทันทีที่ตรวจพบ รวมข้อความว่าง แม้มี prose ก่อนหน้า
+  และส่ง reset เมื่อเปลี่ยนแหล่ง; terminal ย้อนลบ progress เก่าไม่ได้จึงแสดงป้ายปรับข้อความ
+- เพิ่ม integration tests ผ่าน bridge จำลอง 4 กรณี ทั้ง JSON และ terminal และ prose ก่อน final:
+  ส่ง envelope ที่ยังไม่ปิดทีละส่วน แล้วรอ stdout ยืนยันข้อความแต่ละส่วนก่อนส่ง final response;
+  terminal ต้องแสดง final ครบครั้งเดียว และไม่มี newline แทรกกลาง partial หลัง reset
+- ไม่เปลี่ยน live acceptance prompt, เกณฑ์ gate หรือผลรอบเก่า
+  การที่โมเดลเว็บทำตาม protocol ใหม่ยังต้องยืนยันจริงเมื่อ extension เชื่อมต่อ
+- ทีมรีวิว Rust และ JavaScript แยกจากทีมพัฒนา ตรวจซ้ำหลังแก้แล้วไม่พบ blocker ใน diff นี้
+  Rust 32 unit + 1 integration wrapper (10 scenarios เดิมใน Node), fmt/check/clippy ผ่าน
+  Node ทั้งชุด 67/67 ผ่านโดยใช้ release binary ที่ติดตั้งจริง ไม่บวก wrapper เป็นกรณีไม่ซ้ำ
+- Build release และติดตั้งด้วย `--with-harness --no-start --no-path` แล้ว
+  SHA256 ของ binary ที่ติดตั้งตรง release build; extension ยังเป็น 1.1.11 ไม่เปลี่ยนในรอบนี้
+  `argon --status` หลังติดตั้ง: ready=false, extensionConnected=false, clients=[],
+  queue=0, ไม่มี lease; ไม่ส่ง prompt เข้า Gemini จริงเพิ่ม จึงยังไม่ประกาศ completion

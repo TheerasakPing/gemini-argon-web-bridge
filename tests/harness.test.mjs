@@ -69,6 +69,81 @@ sys.exit(child.wait())
   return {dir,install,workspace,state,api,poll,launch};
 }
 
+for (const {jsonMode,prose} of [{jsonMode:false,prose:''},{jsonMode:true,prose:''},{jsonMode:true,prose:'Earlier commentary\n'},{jsonMode:false,prose:'Earlier commentary\n'}]) {
+  test(`Rust agent streams final text before completion (${jsonMode?'JSON':'terminal'}${prose?', with prose':''})`,{skip,timeout:20000},async t=>{
+    const f=await setup(t);
+    const run=f.launch(['agent','Answer briefly',...(jsonMode?['--json']:[])]);
+    let task;
+    for(let tries=0;tries<200;tries++){
+      task=(await f.poll()).body.task;
+      if(task)break;
+      await delay(20);
+    }
+    assert.ok(task,'agent submitted a model job');
+    const nonce=task.prompt.match(/"nonce":"([^"]+)"/)?.[1];
+    assert.ok(nonce);
+    const text='Streaming answer: 4+2 = 6.';
+    const prefix=prose+'<<<ARGON_ACTION>>>'+JSON.stringify({
+      version:1,nonce,id:'stream_final',action:{type:'final',text:''},
+    }).replace(/""}}$/,'"');
+    if(prose){
+      const progress=await f.api(`/jobs/${task.id}/progress`,{
+        claimToken:task.claimToken,phase:'generating',partial:prose,
+      });
+      assert.equal(progress.status,200);
+      let seen=false;
+      for(let tries=0;tries<200;tries++){
+        if(run.received.map(chunk=>chunk.text).join('').includes('Earlier commentary')){seen=true;break;}
+        await delay(20);
+      }
+      assert.ok(seen,'progress prose is visible before final type is known');
+    }
+    for(const partial of ['Streaming answer: ','Streaming answer: 4+2 = 6.']){
+      const progress=await f.api(`/jobs/${task.id}/progress`,{
+        claimToken:task.claimToken,phase:'generating',partial:prefix+partial,
+      });
+      assert.equal(progress.status,200);
+      let seen=false;
+      for(let tries=0;tries<200;tries++){
+        const output=run.received.map(chunk=>chunk.text).join('');
+        const displayed=jsonMode ? output.trim().split('\n').reduce((visible,line)=>{
+          try{
+            const event=JSON.parse(line);
+            if(event.data?.job_id===task.id&&event.data.job_status==='running'&&event.data.job_phase==='generating'){
+              if(event.event==='assistant_reset')return event.data.text;
+              if(event.event==='assistant_delta')return visible+event.data.text;
+            }
+          }
+          catch{}
+          return visible;
+        },'') : prose ? output.split('\n[Gemini ปรับข้อความ]\n').at(-1) : output;
+        if(displayed===partial){seen=true;break;}
+        await delay(20);
+      }
+      assert.ok(seen,'decoded final text reaches stdout while the job is still generating');
+    }
+    const response=await f.api(`/jobs/${task.id}/response`,{
+      claimToken:task.claimToken,text:prefix+text+'"}}<<<END_ARGON_ACTION>>>',
+    });
+    assert.equal(response.status,200);
+    const result=await run.ended;
+    assert.equal(result.code,0,result.err);
+    if(jsonMode){
+      const events=result.out.trim().split('\n').map(line=>JSON.parse(line));
+      const final=events.find(event=>event.event==='final');
+      assert.equal(final.data.text,text);
+      assert.equal(final.data.already_displayed,true);
+      assert.equal(events.reduce((visible,event)=>event.event==='assistant_reset'?event.data.text:
+        event.event==='assistant_delta'?visible+event.data.text:visible,''),text);
+      if(prose)assert.ok(events.some(event=>event.event==='assistant_reset'),'final source replaces earlier progress');
+    }else{
+      assert.equal(result.out.trim(),prose ? `${prose}\n[Gemini ปรับข้อความ]\n${text}` : text,
+        'terminal prints final once without splitting its words across reset and delta');
+      assert.ok(!result.out.includes('<<<ARGON_ACTION>>>'));
+    }
+  });
+}
+
 test('Rust agent: real bridge multi-turn read, streaming, final, session fork', {skip},async t=>{
   const f=await setup(t);
   const run=f.launch(['agent','Understand this project','--json']);
@@ -121,7 +196,7 @@ test('Rust agent: real bridge multi-turn read, streaming, final, session fork', 
       e.data.job_status==='running'&&e.data.job_phase==='generating');
     assert.ok(partials.length>=2);
     assert.ok(partials.at(-1).at_ms-partials[0].at_ms>=100);
-    assert.ok(events.some(e=>e.event==='assistant_delta'&&e.data.job_id===job&&e.data.job_status==='done'),
+    assert.ok(events.some(e=>['assistant_delta','assistant_reset'].includes(e.event)&&e.data.job_id===job&&e.data.job_status==='done'),
       'text first received from completed response is labelled done');
   }
   const id=readdirSync(f.state)[0];
