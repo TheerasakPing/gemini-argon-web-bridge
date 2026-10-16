@@ -41,6 +41,23 @@ Argon เชื่อม CLI เข้ากับแท็บ Gemini ที่�
 | **ติดตามงานได้** | มีสถานะ CLI, animation บนหน้าเว็บ, popup และคำสั่งตรวจ selectors |
 | **ควบคุมงานในเครื่อง** | Queue ทำงานทีละงาน พร้อม claim token ป้องกันการรับงานซ้ำ |
 
+## สถานะการทดสอบ
+
+ผลที่ยืนยันเมื่อ **16 ตุลาคม 2026** สำหรับ extension **1.1.11**,
+Rust harness ที่ commit `e645efe` และ CLI relay ที่ commit `e2f8e41`:
+
+| การตรวจ | ผล |
+| :--- | :--- |
+| Automated tests | Node.js 67/67, Python 33/33 และ Rust unit tests 32/32 ผ่าน; Rust integration wrapper ครอบคลุม 10 scenarios |
+| Brave Beta + Gemini จริง | Smoke ผ่าน 1/1; ชุดเต็มผ่าน 3 งาน แล้วงานที่ 4 timeout จึงหยุด ไม่ได้รันงานที่ 5–10 |
+| ความครบของ final streaming | ใน 3 งานที่ผ่าน การรวม JSON reset/delta ตรงกับ final ทุกอักขระ; partial แรกมาก่อน final ประมาณ 3.7–4.7 วินาที |
+| Terminal relay | ทดสอบ subprocess + PTY จริงแล้ว; การสตรีมผ่าน agy จริงร่วมกับ Brave ยังรอยืนยัน |
+| Recovery | ยืนยัน reconcile งานที่จบด้วย error โดยไม่ส่งงานซ้ำ; successful interrupted-job resume ยังรอ live verification |
+
+**Rust harness ยังเป็น experimental** เกณฑ์ยกระดับ stable ต้องผ่าน live อย่างน้อย 9/10
+และตรวจ ownership/recovery กับ agy ตาม [แผนและบันทึกการทดสอบ](PLAN.md)
+ผล automated ไม่แทนการทดสอบหน้า Gemini จริง และผลรอบเก่าไม่รับรองรุ่นปัจจุบัน
+
 ## Quick start
 
 ### 1. ตรวจ prerequisites
@@ -249,7 +266,7 @@ argon agent --json --max-turns 10 "ตรวจโครงสร้างโป
   โดยละเฉพาะ whitespace รอบนอก เมื่อพบ `final.text` ระบบเลือกแหล่งนี้เสมอแม้มี prose นำหน้า
   และส่ง `assistant_reset` เมื่อเปลี่ยนแหล่ง JSON consumer ใช้ reset แทนข้อความเดิมได้
   terminal ย้อนลบ progress ที่พิมพ์ไปแล้วไม่ได้ จึงแสดง `[Gemini ปรับข้อความ]` แล้วสตรีม final ต่อ
-  การทำตาม protocol ใหม่ของโมเดลยังต้องยืนยัน live
+  live 3 งานล่าสุดยืนยันการรวม final ได้ครบ; การทำตาม protocol ตลอดชุด 10 งานยังไม่ผ่าน gate
 - ยังไม่มี sandbox สำหรับ Linux/Windows, LSP/DAP, full-screen TUI, executable plugins, autonomous subagents,
   interactive session tree หรือ automatic context compaction
 - รุ่นนี้เป็น experimental; automated fixtures และ live Brave verification ต้องรายงานแยกกัน
@@ -260,9 +277,13 @@ argon agent --json --max-turns 10 "ตรวจโครงสร้างโป
 
 ```sh
 python3 tests/live_harness.py \
-  --binary /Volumes/Data/dot-cache/argon/bin/argon-harness \
+  --binary ./harness/target/release/argon-harness \
   --output /tmp/argon-live-acceptance
 ```
+
+ตัวอย่างนี้ใช้ release binary ที่ build จาก source ด้วย
+`cargo build --release --manifest-path harness/Cargo.toml`
+หากทดสอบรุ่นที่ติดตั้งแล้ว ให้เปลี่ยน `--binary` เป็น path ของ `bin/argon-harness` ในโฟลเดอร์ติดตั้ง
 
 รายงานต้องมีอย่างน้อย 9/10 งานผ่านก่อนยกระดับ stable; `--count 1` ใช้ smoke test
 แต่ไม่นับว่าผ่าน gate เต็ม ชุดนี้อ่านอย่างเดียวและไม่อนุมัติ mutation แทนผู้ใช้
@@ -305,8 +326,8 @@ Extension อ่านเนื้อคำตอบที่แสดงบน�
 ส่วนท้ายที่ยังไม่พบตัวคั่นจะถูกส่งเมื่อมีข้อความเพิ่มหรือเมื่องานจบ
 
 - เริ่มสตรีมได้เมื่อเว็บแสดง **เนื้อคำตอบ** แล้ว; ช่วง thinking ที่ยังไม่มีคำตอบจึงอาจเงียบ
-- ใน agent run ช่วงเงียบประมาณ 8 วินาทีก่อนคำตอบสุดท้ายมักเป็นเวลาที่โมเดลคิดกับ prompt ขนาดใหญ่
-  ไม่ใช่ bridge หรือ extension; ทดสอบ `/ask` ตรงแล้วข้อความโตทุกประมาณ 0.5 วินาที
+- ช่วงเงียบใน agent run อาจเกิดระหว่างโมเดลคิด เรียก tool หรือรอหน้าเว็บ render
+  ใช้สถานะ job และข้อความบนเว็บประกอบการตรวจ; ระยะเวลาที่เงียบอย่างเดียวระบุสาเหตุไม่ได้
 - นี่คือ DOM streaming ไม่ใช่ token stream โดยตรงจากโมเดล จังหวะขึ้นกับการ render ของเว็บ
 - หากข้อความยาวไม่มี whitespace อาจต้องรอจนพบตัวคั่นหรือจนงานจบ
 - หากเว็บย้อนแก้ส่วนที่ CLI พิมพ์แล้ว CLI อาจพัก partial output และส่งคำตอบฉบับเต็มเมื่อจบ
@@ -581,15 +602,17 @@ py -3 "$HOME\.gemini\config\skills\argon\scripts\gemini_argon_bridge.py" --statu
 gemini-argon-web-bridge/
 ├── bridge/server.mjs              # HTTP server, queue, history, SSE
 ├── extension/                     # Manifest V3, worker, content script, popup
+├── harness/                       # Rust agent loop, tools, permissions, sandbox และ recovery
 ├── scripts/
 │   ├── gemini_argon_bridge.py     # CLI, live output, lifecycle helpers
 │   └── install.py                 # Installer และ token pairing
 ├── mcp/server.mjs                 # MCP stdio adapter
 ├── bin/                           # Shell / Windows launchers
-├── tests/                         # Bridge, DOM fixtures, CLI และ installer tests
+├── tests/                         # Bridge, DOM fixtures, CLI, installer และ opt-in live tests
 ├── install.sh                     # Bootstrap สำหรับ macOS/Linux
 ├── install.ps1                    # Bootstrap สำหรับ PowerShell
-└── SKILL.md                       # คำแนะนำสำหรับ agent client
+├── SKILL.md                       # คำแนะนำสำหรับ agent client
+└── PLAN.md                        # ขอบเขต harness, acceptance gates และหลักฐานการทดสอบ
 ```
 
 รันจาก source checkout:
@@ -598,6 +621,11 @@ gemini-argon-web-bridge/
 node --test tests/*.test.mjs
 python3 -m unittest discover -s tests -p 'test_*.py'
 sh -n install.sh
+
+# เมื่อพัฒนา Rust harness
+cargo fmt --manifest-path harness/Cargo.toml -- --check
+cargo test --manifest-path harness/Cargo.toml
+cargo clippy --manifest-path harness/Cargo.toml --all-targets -- -D warnings
 ```
 
 CI รันบน Ubuntu และ macOS ด้วย Node.js 20 และ Python 3.9
