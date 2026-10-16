@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Local Gemini web bridge CLI; no third-party Python dependencies."""
 import argparse
+import codecs
 import json
 import os
 import plistlib
@@ -90,6 +91,47 @@ class LiveOutput:
         if self.terminal:
             self.terminal.close()
             self.terminal = None
+
+
+def run_harness(command, env):
+    """Keep inherited stdio unless captured output needs an agy TTY mirror."""
+    output = LiveOutput('--json' not in command[1:])
+    try:
+        if output.terminal is None:
+            return subprocess.call(command, env=env)
+        # Inherit stdin (interactive approvals) and stderr. Only stdout needs a
+        # pipe; os.read avoids waiting for a newline or a full buffered read.
+        process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE)
+        decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
+        try:
+            while True:
+                chunk = os.read(process.stdout.fileno(), 4096)
+                if not chunk:
+                    break
+                text = decoder.decode(chunk)
+                if text:
+                    output.write(text)
+            tail = decoder.decode(b'', final=True)
+            if tail:
+                output.write(tail)
+            return process.wait()
+        except BaseException:
+            # Give a child sharing our process group the same brief SIGINT
+            # cleanup window as subprocess.call before killing/reaping it.
+            if isinstance(sys.exc_info()[1], KeyboardInterrupt):
+                try:
+                    process.wait(timeout=0.25)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+            else:
+                process.kill()
+                process.wait()
+            raise
+        finally:
+            process.stdout.close()
+    finally:
+        output.close()
 
 
 def request(path, payload=None, timeout=5):
@@ -624,7 +666,7 @@ def main():
             if state.get('agentProtocol') != 1:
                 raise RuntimeError('Bridge needs restart for agent protocol v1; finish current work then restart the bridge.')
         env = dict(os.environ, ARGON_ROOT=str(ROOT))
-        return subprocess.call([str(binary), *sys.argv[1:]], env=env)
+        return run_harness([str(binary), *sys.argv[1:]], env=env)
     parser = build_parser()
     args = parser.parse_args()
     if args.stream is None:

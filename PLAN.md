@@ -1,6 +1,6 @@
 # แผนสร้าง Argon Agent Harness
 
-สถานะ: Rust harness v0.1.0 แบบ experimental; live gate เคยผ่าน 10/10 (round 11, Extension 1.1.8, Flash-Lite; อ่านอย่างเดียว) และเคยยืนยัน edit/run_command ตามบันทึกด้านล่างแล้ว รุ่นปัจจุบัน Extension 1.1.11 ยังต้องยืนยัน live ใหม่: smoke ล่าสุดหยุดก่อน tools เพราะปุ่มส่งใช้งานไม่ได้ และ bridge รายงาน draft ค้าง
+สถานะ: Rust harness v0.1.0 แบบ experimental; live gate เคยผ่าน 10/10 (round 11, Extension 1.1.8, Flash-Lite; อ่านอย่างเดียว) และเคยยืนยัน edit/run_command ตามบันทึกด้านล่างแล้ว รุ่นปัจจุบัน Extension 1.1.11 + harness `e645efe`: smoke ผ่าน 1/1, ชุดเต็มหยุดที่ 3 ผ่าน / 1 timeout จึงยังไม่ผ่าน gate รุ่นปัจจุบัน
 วันที่: 16 ตุลาคม 2026  
 ฐานโค้ด: Argon Web Bridge, commit `cd7d562`
 
@@ -222,7 +222,8 @@ tab binding ขั้นต่ำต้องมีตั้งแต่ prototy
 ## ขั้นถัดไป
 
 parser/provider/read loop และ opt-in editing/commands ทำแล้วพร้อม automated fixtures
-ขั้นถัดไปคือให้ `run_command` ผ่านใน live (ทดสอบด้วย python ที่ sandbox โหลดได้ หรือกำหนด interpreter ใน allowlist) และยืนยัน recovery/OS sandbox ใน workflow จริงก่อนยกระดับเป็น stable
+live `run_command` ผ่านหลังแก้ interpreter แล้วตามหลักฐานด้านล่าง
+ขั้นถัดไปคือ live gate รุ่นปัจจุบัน, successful recovery/resume บน Brave และ streaming ผ่าน agy จริงก่อนยกระดับเป็น stable
 
 ## แผนปรับปรุง: รวมแนวคิดจากห้า harness
 
@@ -413,3 +414,39 @@ parser/provider/read loop และ opt-in editing/commands ทำแล้ว�
   SHA256 ของ binary ที่ติดตั้งตรง release build; extension ยังเป็น 1.1.11 ไม่เปลี่ยนในรอบนี้
   `argon --status` หลังติดตั้ง: ready=false, extensionConnected=false, clients=[],
   queue=0, ไม่มี lease; ไม่ส่ง prompt เข้า Gemini จริงเพิ่ม จึงยังไม่ประกาศ completion
+
+### Live รุ่น e645efe และ agy harness relay — 2026-10-16
+
+- พบ Brave Beta ไม่ได้ทำงาน เปิดแอปแล้ว `argon --doctor` ยืนยัน runtime extension 1.1.11
+  จากนั้น ready=true, Flash-Lite, modelVerified=false
+- มี Gemini พร้อมสองแท็บ runner จึงหยุดก่อนส่ง prompt; เพิ่ม `--tab ID` ส่งต่อ argv ไป harness
+  โดยไม่เปลี่ยน prompt/เกณฑ์ acceptance และทีมรีวิว Python ตรวจแล้ว
+- Smoke `/tmp/argon-live-e645efe-tab-smoke/report.json`: 1/1 ผ่าน, 44.64 วินาที,
+  3 tools, streaming partial 18 events, facts ถูกต้อง, fixture ไม่เปลี่ยน, repairs=0
+- ชุดเต็ม `/tmp/argon-live-e645efe-full/report.json`: 3/4 ก่อนหยุด
+  case 4 timeout หลัง list_files สำเร็จหนึ่งครั้ง; ภายหลังไม่พบ process Brave Beta
+  และ extension disconnected ไม่สรุปสาเหตุว่า browser crash หรือ quota จากข้อมูลนี้
+- ทีมรีวิวตรวจ final jobs ของ 3 งานที่ผ่าน: รวม reset/delta ตรง final ทุกอักขระ
+  (629, 395, 429 อักขระ), เริ่ม partial ก่อน final 3.98, 3.73, 4.68 วินาที
+  case 3 มี source reset หนึ่งครั้ง; ข้อความสุดท้ายครบก่อน final ประมาณ 2.6 วินาที
+  เป็นหลักฐาน JSON reconstruction ไม่ใช่การย้อนลบ prose บน plain terminal
+- จับภาพหน้าต่าง Brave จริงที่ `/tmp/argon-brave-live-overlay.png`
+  เห็น overlay “Gemini กำลังตอบ”, timer และกราฟิกระหว่างงาน; ภาพเดียวไม่พิสูจน์ animation เคลื่อนไหวครบ
+  ภาพเก็บเฉพาะเครื่องทดสอบ ไม่ใส่ repository เพราะมี UI อื่นของผู้ใช้
+- Live recover/reconcile case 4 ใช้ job เดิม `68182a4a-029d-4183-a576-3d2d3e5b9f4a`,
+  resolution=terminal_model_error; pending ถูกล้าง, turns คง 1, list_files ไม่รันซ้ำ
+  ยังไม่ใช่ successful resume
+- ทีมรีวิวตามหลักฐาน mutation เดิมพบ edit สำเร็จที่
+  `/tmp/argon-state-20261016065146/71c39400-20f5-4000-a780-f807e9dab1e5/state.json`
+  และ command exit 0/stdout `ok\n` ที่
+  `/tmp/argon-cmd-state/cdc76b97-09b5-4a35-bedc-b6e39f666914/state.json`
+  ทั้งสองมี exact-action approval; ไม่ใช่ successful edit+command ใน session เดียว
+- พบ Python harness routing ไม่ผ่าน LiveOutput จึงขาด mirror สำหรับ agy ที่ capture stdout
+  เพิ่ม relay เฉพาะเมื่อพบ ancestor agy TTY และไม่ใช้ JSON, อ่าน UTF-8 incremental
+  โดยคง stdin/stderr และ return code; fallback ที่ไม่มี mirror ใช้ subprocess.call เดิม
+  ทดสอบ subprocess+PTY เห็น partial ก่อน child รับ stdin approval/exit และข้อความครบครั้งเดียวทั้งสองปลายทาง
+  agy จริงกับ Brave ยังต้องทดสอบแยก
+- Python 33/33 ผ่าน, ทีมรีวิว Python ไม่พบ blocker ใน relay และ `--tab` diff
+  cancellation coverage รอบนี้เป็น mock; การทดลอง SIGINT/process-group เพิ่มของ reviewer
+  พบ PermissionError จึงไม่ใช่หลักฐานผ่าน real cancellation
+  ติดตั้ง CLI ด้วย installer และตรวจ SHA256 ตรง source แล้ว

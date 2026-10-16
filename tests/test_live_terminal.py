@@ -8,6 +8,8 @@ try:
 except ImportError:
     pty = None
 import select
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -18,6 +20,60 @@ spec.loader.exec_module(bridge)
 
 
 class LiveTerminalTests(unittest.TestCase):
+    @unittest.skipIf(pty is None, 'PTY requires macOS or Linux')
+    def test_harness_streams_to_capture_and_ancestor_tty_before_exit(self):
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        self.addCleanup(os.close, slave)
+        # Child cannot finish until the test supplies approval through inherited
+        # stdin. This proves partial output arrives before completion.
+        child = (
+            "import os,sys\n"
+            "os.write(1,b'first ')\n"
+            "assert os.read(0,1)==b'y'\n"
+            "raw='คำตอบ final\\n'.encode()\n"
+            "os.write(1,raw[:1]); os.write(1,raw[1:])\n"
+            "os.write(2,b'child stderr\\n')\n"
+            "sys.exit(7)\n"
+        )
+        wrapper = (
+            "import importlib.util,os,sys\n"
+            f"spec=importlib.util.spec_from_file_location('bridge',{str(Path(bridge.__file__))!r})\n"
+            "bridge=importlib.util.module_from_spec(spec); spec.loader.exec_module(bridge)\n"
+            f"bridge.agy_terminal=lambda: {os.ttyname(slave)!r}\n"
+            f"sys.exit(bridge.run_harness([sys.executable,'-u','-c',{child!r}],dict(os.environ)))\n"
+        )
+        process = subprocess.Popen(
+            [sys.executable, '-u', '-c', wrapper], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.addCleanup(lambda: process.poll() is None and process.kill())
+        try:
+            ready, _, _ = select.select([process.stdout], [], [], 5)
+            self.assertTrue(ready, 'Captured harness output waited for child exit')
+            captured = os.read(process.stdout.fileno(), 4096)
+            self.assertEqual(captured, b'first ')
+            ready, _, _ = select.select([master], [], [], 5)
+            self.assertTrue(ready, 'Ancestor TTY waited for child exit')
+            mirrored = os.read(master, 4096)
+            self.assertEqual(mirrored, b'first ')
+            self.assertIsNone(process.poll())
+            remainder, stderr = process.communicate(b'y', timeout=5)
+            self.assertEqual(process.returncode, 7)
+            self.assertEqual(stderr, b'child stderr\n')
+            expected = 'first คำตอบ final\n'.encode()
+            self.assertEqual(captured + remainder, expected)
+            ready, _, _ = select.select([master], [], [], 5)
+            self.assertTrue(ready)
+            mirrored += os.read(master, 4096)
+            self.assertEqual(mirrored.replace(b'\r\n', b'\n'), expected)
+            self.assertFalse(select.select([master], [], [], 0)[0], 'Final output repeated')
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            for pipe in (process.stdin, process.stdout, process.stderr):
+                pipe.close()
+
     def test_whitespace_chunks_flush_before_completion_and_keep_tail(self):
         writes = []
         args = bridge.build_parser().parse_args(['hello', '--stream', '--no-spinner'])

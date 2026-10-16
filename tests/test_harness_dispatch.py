@@ -35,10 +35,44 @@ class HarnessDispatchTests(unittest.TestCase):
             with patch.object(bridge, 'ROOT', root), \
                     patch.object(bridge.sys, 'argv', ['argon', 'agent', 'คำถามมีช่องว่าง']), \
                     patch.object(bridge, 'ensure_server', return_value={'agentProtocol': 1}), \
+                    patch.object(bridge, 'agy_terminal', return_value=None), \
                     patch.object(bridge.subprocess, 'call', return_value=0) as call:
                 self.assertEqual(bridge.main(), 0)
             self.assertEqual(call.call_args.args[0], [str(binary), 'agent', 'คำถามมีช่องว่าง'])
             self.assertEqual(call.call_args.kwargs['env']['ARGON_ROOT'], str(root))
+
+    def test_json_dispatch_never_discovers_or_mirrors_terminal(self):
+        with patch.object(bridge, 'agy_terminal') as discover, \
+                patch.object(bridge.subprocess, 'Popen') as piped, \
+                patch.object(bridge.subprocess, 'call', return_value=7) as call:
+            self.assertEqual(bridge.run_harness(['harness', 'agent', '--json', 'task'], {}), 7)
+            discover.assert_not_called()
+            piped.assert_not_called()
+            call.assert_called_once_with(['harness', 'agent', '--json', 'task'], env={})
+
+    def test_mirrored_cancellation_kills_and_reaps_child(self):
+        with patch.object(bridge, 'LiveOutput') as output, \
+                patch.object(bridge.subprocess, 'Popen') as spawn, \
+                patch.object(bridge.os, 'read', side_effect=KeyboardInterrupt):
+            child = spawn.return_value
+            child.wait.side_effect = [bridge.subprocess.TimeoutExpired('harness', 0.25), 0]
+            with self.assertRaises(KeyboardInterrupt):
+                bridge.run_harness(['harness', 'agent', 'task'], {})
+            self.assertEqual(spawn.call_args.kwargs, {'env': {}, 'stdout': bridge.subprocess.PIPE})
+            child.kill.assert_called_once_with()
+            self.assertEqual(child.wait.call_count, 2)
+            self.assertEqual(child.wait.call_args_list[0].kwargs, {'timeout': 0.25})
+            child.stdout.close.assert_called_once_with()
+            output.return_value.close.assert_called_once_with()
+
+    def test_mirrored_cancellation_allows_child_cleanup(self):
+        with patch.object(bridge, 'LiveOutput'), \
+                patch.object(bridge.subprocess, 'Popen') as spawn, \
+                patch.object(bridge.os, 'read', side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                bridge.run_harness(['harness', 'agent', 'task'], {})
+            spawn.return_value.kill.assert_not_called()
+            spawn.return_value.wait.assert_called_once_with(timeout=0.25)
 
     def test_missing_binary_and_old_bridge_fail_explicitly(self):
         with tempfile.TemporaryDirectory() as directory:

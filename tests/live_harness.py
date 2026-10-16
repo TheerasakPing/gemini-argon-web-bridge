@@ -28,6 +28,7 @@ def main():
     parser.add_argument('--start-case', type=int, default=1)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--keep-going', action='store_true', help='continue after a failed case')
+    parser.add_argument('--tab', type=int, help='Explicit Gemini tab ID passed to the harness')
     args = parser.parse_args()
     output = args.output or Path(tempfile.mkdtemp(prefix='argon-live-acceptance-'))
     output.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -88,6 +89,7 @@ def main():
             process = subprocess.Popen(
                 [str(args.binary.resolve()), 'agent', prompt, '--read-only', '--json',
                  '--max-turns', '10', '--max-seconds', '240',
+                 *(['--tab', str(args.tab)] if args.tab is not None else []),
                  '--state-dir', str(case / 'sessions')],
                 cwd=project, stdout=out, stderr=err)
             try:

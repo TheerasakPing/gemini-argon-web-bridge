@@ -266,6 +266,7 @@ python3 tests/live_harness.py \
 
 รายงานต้องมีอย่างน้อย 9/10 งานผ่านก่อนยกระดับ stable; `--count 1` ใช้ smoke test
 แต่ไม่นับว่าผ่าน gate เต็ม ชุดนี้อ่านอย่างเดียวและไม่อนุมัติ mutation แทนผู้ใช้
+ถ้ามี Gemini พร้อมใช้งานหลายแท็บ ให้เพิ่ม `--tab ID` เพื่อเลือกแท็บเดียวอย่างชัดเจน
 
 ถ้าติดตั้งทับ daemon รุ่นเก่าแล้ว `argon agent` แจ้งว่า protocol ไม่พร้อม
 ให้รอ jobs จบก่อน restart daemon จากนั้นตรวจ `argon --status` ว่ามี `agentProtocol: 1`
@@ -311,6 +312,9 @@ Extension อ่านเนื้อคำตอบที่แสดงบน�
 - หากเว็บย้อนแก้ส่วนที่ CLI พิมพ์แล้ว CLI อาจพัก partial output และส่งคำตอบฉบับเต็มเมื่อจบ
 - โปรแกรมที่ครอบ CLI อาจ buffer stdout เพิ่ม แม้ Argon จะ flush แล้ว
 - เมื่อพบ ancestor process ชื่อ `agy` ที่มี TTY บน macOS/Linux ระบบจะส่งข้อความเข้า TTY นั้นด้วย; GUI/headless session ไม่มี TTY ให้ส่งตรง
+  รองรับทั้งคำถามปกติและ harness `agent`/`resume` ที่ไม่ใช้ `--json`
+  harness คง stdin/stderr เดิมเพื่อรับ approval และแสดง diagnostic; JSON ส่ง stdout เดิมโดยไม่ mirror
+  ตรวจด้วย subprocess และ PTY จริงแล้ว ส่วนการเรียกจาก agy จริงยังต้องยืนยันแยก
 
 ## Integrations
 

@@ -18,11 +18,15 @@ spec.loader.exec_module(live)
 
 
 class AcceptanceGateTests(unittest.TestCase):
-    def run_fixture(self, *, buffered=False, wrong_facts=False, mutate=False, split_jobs=False):
+    def run_fixture(self, *, buffered=False, wrong_facts=False, mutate=False, split_jobs=False, tab=None):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "results"
 
             def fake_process(argv, *, cwd, stdout, stderr):
+                if tab is not None:
+                    self.assertEqual(argv[argv.index("--tab") + 1], str(tab))
+                else:
+                    self.assertNotIn("--tab", argv)
                 project = Path(cwd)
                 source_path = next(project.glob("calc_*.py"))
                 source = source_path.read_text()
@@ -71,6 +75,8 @@ class AcceptanceGateTests(unittest.TestCase):
 
             arguments = ["live_harness.py", "--binary", sys.executable, "--count", "1",
                          "--output", str(output)]
+            if tab is not None:
+                arguments.extend(["--tab", str(tab)])
             with patch.object(sys, "argv", arguments), \
                     patch.object(live, "health", return_value={"ready": True}), \
                     patch.object(live.subprocess, "Popen", side_effect=fake_process), \
@@ -84,6 +90,11 @@ class AcceptanceGateTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(report["passed"])
         self.assertTrue(report["streaming_verified"])
+
+    def test_forwards_explicit_tab_without_changing_acceptance(self):
+        code, report = self.run_fixture(tab=1869336121)
+        self.assertEqual(code, 0)
+        self.assertTrue(report["passed"])
 
     def test_rejects_buffered_deltas_even_when_emitted_before_final(self):
         code, report = self.run_fixture(buffered=True)
