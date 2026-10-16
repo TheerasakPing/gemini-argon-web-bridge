@@ -516,9 +516,75 @@ impl Workspace {
     }
 }
 
+/// Detect the project stack and entry documents from the full file list, so large trees
+/// still surface their manifests even when the prompt only carries a partial listing.
+pub fn overview(files: &[String]) -> String {
+    const STACKS: &[(&str, &str)] = &[
+        ("Cargo.toml", "Rust"),
+        ("package.json", "Node/TypeScript"),
+        ("go.mod", "Go"),
+        ("pyproject.toml", "Python"),
+        ("requirements.txt", "Python"),
+        ("pom.xml", "Java/Maven"),
+        ("build.gradle", "Java/Gradle"),
+        ("Gemfile", "Ruby"),
+        ("composer.json", "PHP"),
+    ];
+    const DOCS: &[&str] = &["AGENTS.md", "README.md", "README", "PLAN.md", "SKILL.md"];
+    let base = |f: &str| f.rsplit('/').next().unwrap_or(f).to_string();
+    let mut stacks: Vec<&str> = Vec::new();
+    let mut manifests: Vec<&String> = Vec::new();
+    for f in files {
+        let name = base(f);
+        if let Some((_, stack)) = STACKS.iter().find(|(m, _)| *m == name) {
+            if !stacks.contains(stack) {
+                stacks.push(stack);
+            }
+            if f.matches('/').count() <= 1 && manifests.len() < 8 {
+                manifests.push(f);
+            }
+        }
+    }
+    let docs: Vec<&String> = files
+        .iter()
+        .filter(|f| f.matches('/').count() == 0 && DOCS.contains(&f.as_str()))
+        .collect();
+    let mut dirs: Vec<&str> = files
+        .iter()
+        .filter_map(|f| f.split_once('/').map(|(d, _)| d))
+        .collect();
+    dirs.dedup();
+    dirs.truncate(20);
+    format!(
+        "files={} stack={} manifests={:?} docs={:?} top_dirs={:?}",
+        files.len(),
+        if stacks.is_empty() {
+            "unknown".to_string()
+        } else {
+            stacks.join(",")
+        },
+        manifests,
+        docs,
+        dirs
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn overview_detects_stack_and_docs() {
+        let files: Vec<String> = ["README.md", "src/main.rs", "Cargo.toml", "web/package.json"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let o = overview(&files);
+        assert!(
+            o.contains("Rust,Node/TypeScript") && o.contains("README.md") && o.contains("files=4"),
+            "{o}"
+        );
+    }
+
     #[test]
     fn confined_ignored_and_credential_reads() {
         let dir = tempfile::tempdir().unwrap();

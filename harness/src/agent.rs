@@ -4,7 +4,7 @@ use crate::{
     provider::Bridge,
     recovery,
     session::Session,
-    workspace::{digest, Workspace},
+    workspace::{self, digest, Workspace},
 };
 use anyhow::{ensure, Context, Result};
 use serde_json::{json, Value};
@@ -206,14 +206,16 @@ pub fn run(
             saved
         } else {
             let nonce = Uuid::new_v4().to_string();
+            let all_files = workspace.files();
             let prompt = format!(
-                "{}\nTASK:\n{}\nPROJECT FILES (partial):\n{}\nEVIDENCE AND PRIOR ACTIONS:\n{}",
+                "{}\nTASK:\n{}\nPROJECT OVERVIEW (auto-detected; read the manifests and docs first):\n{}\nPROJECT FILES (partial):\n{}\nEVIDENCE AND PRIOR ACTIONS:\n{}",
                 protocol::instructions(&nonce, session.state.editable, session.state.commands),
                 session.state.task,
-                workspace
-                    .files()
-                    .into_iter()
+                workspace::overview(&all_files),
+                all_files
+                    .iter()
                     .take(160)
+                    .map(String::as_str)
                     .collect::<Vec<_>>()
                     .join("\n"),
                 serde_json::to_string(&session.state.transcript)?

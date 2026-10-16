@@ -122,6 +122,13 @@
     @keyframes equalize{from{transform:scaleY(.2);opacity:.4}to{transform:scaleY(1);opacity:1}}
     @keyframes aura{0%,100%{box-shadow:0 12px 48px #07051588,0 0 22px #8b5cf644}
       50%{box-shadow:0 12px 48px #07051588,0 0 40px #22d3ee44}}
+    .tail{display:none;flex-basis:100%;margin:2px 0 0 50px;max-width:460px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+      color:#cffafe;opacity:.85;font-size:12px}
+    .tail.live{display:block;animation:fadein .3s ease}
+    .tail.live::after{content:"▍";margin-left:2px;color:#67e8f9;animation:blink .8s steps(2) infinite}
+    .pill.done .tail,.pill.err .tail{display:none}
+    @keyframes blink{50%{opacity:0}}
+    @keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:.85;transform:none}}
     @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}`;
   function createOverlay() {
     if (typeof document.createElement !== 'function' || !document.documentElement?.appendChild) return null;
@@ -132,9 +139,9 @@
         <span class="orb" aria-hidden="true"><i class="orbit"></i><i class="orbit outer"></i></span>
         <span class="label"></span>
         <span class="signal" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
-        <span class="meta"></span><span class="bar"></span></div>`;
+        <span class="meta"></span><span class="tail" aria-hidden="true"></span><span class="bar"></span></div>`;
       document.documentElement.appendChild(host);
-      const pill = root.querySelector('.pill'), label = root.querySelector('.label'), meta = root.querySelector('.meta');
+      const pill = root.querySelector('.pill'), label = root.querySelector('.label'), meta = root.querySelector('.meta'), tail = root.querySelector('.tail');
       const startedAt = Date.now(); let chars = 0, ticker = null, closed = false;
       const paint = () => { meta.textContent = `${((Date.now()-startedAt)/1000).toFixed(0)}s${chars ? ` · ${chars} ตัวอักษร` : ''}`; };
       const close = delay => setTimeout(() => {
@@ -144,9 +151,13 @@
       requestAnimationFrame(() => pill.classList.add('on'));
       ticker = setInterval(paint, 250);
       return {
-        show(phase, length) {
+        show(phase, length, text = '') {
           if (closed) return;
-          chars = length || 0; label.textContent = LABELS[phase] || phase; paint();
+          chars = length || 0;
+          // Show the newest streamed words so progress is visible without leaving the tab.
+          if (text) tail.textContent = '…' + text.replace(/\s+/g, ' ').slice(-90);
+          tail.classList.toggle('live', Boolean(text));
+          label.textContent = LABELS[phase] || phase; paint();
         },
         finish(ok, message) {
           if (closed) return;
@@ -209,7 +220,7 @@
     const view = createOverlay();
     let lastPhase = '', lastPartial = '', lastSent = 0, stashedDraft = null;
     const report = (phase, partial = '') => {
-      view?.show(phase, partial.length);
+      view?.show(phase, partial.length, partial);
       const now = Date.now();
       // Preserve every DOM update for terminal streaming; skip only exact duplicates.
       if (phase === lastPhase && partial === lastPartial) return;
