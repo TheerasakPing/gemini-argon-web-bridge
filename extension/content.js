@@ -268,7 +268,20 @@
       if (!assertOwnership()) throw new Error('Gemini prompt ownership could not be confirmed; result discarded');
       report('finishing', found);
       outcome = {text:found,model:model()};
-    } catch (e) { outcome = {error:e.message,model:model()}; }
+    } catch (e) {
+      outcome = {error:e.message,model:model()};
+      // A prompt we typed but never submitted would leave the composer blocked; remove only that.
+      try {
+        const input = editor();
+        if (!submitted && input && squash(input.innerText) === squash(job.prompt) && assertOwnership()) {
+          input.focus();
+          const selection = window.getSelection(); const range = document.createRange();
+          range.selectNodeContents(input); selection.removeAllRanges(); selection.addRange(range);
+          document.execCommand('delete');
+          input.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'deleteContentBackward'}));
+        }
+      } catch { /* Cleanup is best-effort. */ }
+    }
     if (stashedDraft !== null) {
       try {
         if (!assertOwnership()) throw new Error('Gemini prompt ownership could not be confirmed; draft not restored');

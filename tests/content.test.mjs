@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 
 const source=readFileSync(new URL('../extension/content.js',import.meta.url),'utf8');
-function fixture({draft='',generating=false,hiddenStop=null,hiddenStopParent=null,paragraphs=false,changingStatus=false,onTick,initialPath='/app/owned',newQueries}={}) {
+function fixture({draft='',generating=false,hiddenStop=null,hiddenStopParent=null,paragraphs=false,changingStatus=false,onTick,initialPath='/app/owned',newQueries,buttonDisabled=false}={}) {
   let listener, clicks=0, ticks=0, now=1000, delivered; const messages=[]; const inserted=[];
   const result=new Promise(resolve=>{delivered=resolve;});
   const node={getClientRects:()=>[{}]};
@@ -22,7 +22,7 @@ function fixture({draft='',generating=false,hiddenStop=null,hiddenStopParent=nul
   const fresh={...node,
     get innerText(){return `Drafting ${ticks}...\nGemini บอกว่า\n${body.innerText}`;},
     querySelectorAll(selector){return selector==='model-response' ? [] : changingStatus ? [body,nested,second,thought] : [body,nested];}};
-  const button={...node,disabled:false,getAttribute:()=>null,click(){clicks++;input.innerText='';}};
+  const button={...node,disabled:buttonDisabled,getAttribute:()=>null,click(){clicks++;input.innerText='';}};
   const events = {};
   const location = {origin:'https://gemini.google.com',pathname:initialPath,search:''};
   const context=vm.createContext({
@@ -44,7 +44,7 @@ function fixture({draft='',generating=false,hiddenStop=null,hiddenStopParent=nul
         return [];
       },
       createRange:()=>({selectNodeContents(){}}),
-      execCommand(_cmd,_ui,text){inserted.push(text);input.innerText=paragraphs?text.replace(/\n/g,'\n\n'):text;return true;}
+      execCommand(cmd,_ui,text){if(cmd==='delete'){input.innerText='';return true;}inserted.push(text);input.innerText=paragraphs?text.replace(/\n/g,'\n\n'):text;return true;}
     },
     chrome:{runtime:{onMessage:{addListener(fn){listener=fn;}},async sendMessage(message){messages.push(message);if(message.type==='argon:result') delivered(message);return {accepted:true};}}}
   });
@@ -68,6 +68,12 @@ test('content refuses to overwrite a user draft',async()=>{
   assert.equal(f.send({type:'argon:ping'}).ready,false);
   f.send({type:'argon:run',task:{id:'draft',prompt:'hello',deadline:170000}});
   assert.match((await f.result).result.error,/unsent draft/); assert.equal(f.clicks,0);
+});
+test('unsent prompt is removed when the send button stays unavailable',async()=>{
+  const f=fixture({buttonDisabled:true});
+  f.send({type:'argon:run',task:{id:'limit',prompt:'hello',deadline:170000}});
+  assert.match((await f.result).result.error,/send button unavailable/);
+  assert.equal(f.clicks,0); assert.equal(f.input.innerText,'');
 });
 test('content refuses submission while another response is generating',async()=>{
   const f=fixture({generating:true});
