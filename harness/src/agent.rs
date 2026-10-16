@@ -96,6 +96,18 @@ pub fn emit(session: &Session, kind: &str, data: Value, json_mode: bool) -> Resu
     Ok(())
 }
 
+/// Gemini renders markdown, so the streamed text lacks list markers the final JSON keeps.
+/// Compare letters and digits only to avoid printing the same answer twice.
+fn same_words(a: &str, b: &str) -> bool {
+    let key = |t: &str| {
+        t.chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>()
+    };
+    let a = key(a);
+    !a.is_empty() && a == key(b)
+}
+
 fn approve(
     session: &Session,
     action: &Action,
@@ -318,7 +330,7 @@ pub fn run(
             emit(
                 session,
                 "final",
-                json!({"text":text,"already_displayed":visible.trim()==text.trim(),
+                json!({"text":text,"already_displayed":same_words(&visible,text),
                        "unexecuted_mutations":unexecuted_mutations(&session.state.calls)}),
                 limits.json,
             )?;
