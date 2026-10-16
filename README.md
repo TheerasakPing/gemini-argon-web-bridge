@@ -213,6 +213,10 @@ argon agent --json --max-turns 10 "ตรวจโครงสร้างโป
 
 - Tools: `list_files`, `read_file`, `search_text`, `git_diff`, `edit_file`, `create_file`, `run_command`
 - Read/search ใช้ ignore rules, ข้าม hidden/sensitive/generated paths และไม่ตาม symlink
+- ก่อนเริ่มงาน harness สแกนรายชื่อไฟล์ทั้งโปรเจกต์และใส่ `PROJECT OVERVIEW` ลงใน prompt
+  ประกอบด้วยจำนวนไฟล์, stack จาก manifest (`Cargo.toml`, `package.json`, `go.mod`, `pyproject.toml` ฯลฯ),
+  เอกสารหลัก (`README.md`, `AGENTS.md`, `PLAN.md`, `SKILL.md`) และโฟลเดอร์ระดับบน
+  โปรเจกต์ใหญ่จึงยังเห็น manifest แม้รายการไฟล์ใน prompt ถูกตัดเหลือ 160 ไฟล์
 - Edit ต้องอ่านไฟล์ก่อน ใช้ whole-file SHA-256 และ exact text anchor; create ไม่เขียนทับไฟล์เดิม
 - แสดง unified diff ก่อนอนุมัติ edit/create และตรวจ SHA-256 ซ้ำก่อนเขียน
 - `git_diff` เปรียบเทียบ HEAD กับ working copy ของ tracked text file ที่ระบุหนึ่งไฟล์
@@ -223,6 +227,9 @@ argon agent --json --max-turns 10 "ตรวจโครงสร้างโป
   อนุญาตอ่าน system runtime prefixes `/System`, `/usr`, `/bin`, `/sbin`, `/Library/Apple`
   รวม `/private/var/db/dyld` และ filesystem metadata จึงไม่ใช่การแยกข้อมูลทุกไฟล์บนเครื่อง
   แพลตฟอร์มที่ไม่รองรับจะหยุด; `--no-sandbox` เป็นการเลือกใช้สิทธิ์บัญชีผู้ใช้โดยชัดเจน
+  `python` หรือ `python3` ที่พิมพ์เปล่าๆ จะรันเป็น `/Library/Developer/CommandLineTools/usr/bin/python3`
+  เพราะ Homebrew ถูก sandbox บล็อก และ `/usr/bin/python3` เป็น xcrun shim ที่ต้องเขียน cache
+  จึงอนุญาตอ่านเฉพาะ `/Library/Developer/CommandLineTools` เพิ่ม; ถ้าไม่มี CommandLineTools จะใช้คำสั่งตามที่ระบุ
 - stdout/stderr ของ command แสดงหลังจบและตรวจ secret แบบ bounded buffer; ข้อความ Gemini ยัง stream ระหว่างตอบ
 - Session journal เก็บใต้ `~/.local/state/argon/sessions` หรือ `$XDG_STATE_HOME/argon/sessions`
 - ค่า default: 20 model turns, 900 วินาทีรวม, prompt budget 85KB; ถึง budget จะเก็บ session และหยุด
@@ -235,7 +242,10 @@ argon agent --json --max-turns 10 "ตรวจโครงสร้างโป
 - Lease ต่ออายุระหว่างรอโมเดล มีอายุ 30 นาที; ถ้า process crash ให้ตรวจสถานะก่อนใช้ใหม่
   lease ที่หมดอายุจะคืนได้เมื่อ bridge ไม่มีงานค้าง
 - Streaming เป็นข้อความ progress ที่หน้าเว็บส่งมาจริง; control JSON ซ่อนจากหน้าปกติ
-  final answer ที่อยู่ใน envelope จะแสดงหลังตรวจ protocol ผ่าน
+  ถ้าโมเดลเขียนคำตอบทั้งหมดไว้ใน `final.text` harness ถอดข้อความจาก JSON string ที่ยังมาไม่ครบ
+  (รวม `\uXXXX` และ surrogate pair) และพิมพ์ตามช่องว่าง ก่อน envelope จะปิด
+  ตัวตรวจว่าข้อความ "แสดงแล้ว" เทียบเฉพาะตัวอักษรและตัวเลข เพราะหน้าเว็บตัด markdown ออก
+  โมเดลบางครั้งเขียน prose กับ `final.text` ไม่ตรงกัน ทำให้พิมพ์สองชุด
 - ยังไม่มี sandbox สำหรับ Linux/Windows, LSP/DAP, full-screen TUI, executable plugins, autonomous subagents,
   interactive session tree หรือ automatic context compaction
 - รุ่นนี้เป็น experimental; automated fixtures และ live Brave verification ต้องรายงานแยกกัน
@@ -255,7 +265,7 @@ python3 tests/live_harness.py \
 
 ถ้าติดตั้งทับ daemon รุ่นเก่าแล้ว `argon agent` แจ้งว่า protocol ไม่พร้อม
 ให้รอ jobs จบก่อน restart daemon จากนั้นตรวจ `argon --status` ว่ามี `agentProtocol: 1`
-หลังอัปเดตเป็น extension 1.1.4 ให้ Reload ใน `brave://extensions` แล้ว refresh Gemini
+หลังอัปเดตเป็น extension 1.1.9 ให้รัน `python3 scripts/install.py` ก่อน (Brave โหลดจากโฟลเดอร์ติดตั้ง) แล้วกด Reload ใน `brave://extensions` และ refresh Gemini
 เพื่อเปิดใช้การผูกงานกับ numeric tab ID, document และ conversation
 หากผู้ใช้เปลี่ยนหน้า ปิดแท็บ หรือ reload ระหว่างตอบ งานจะหยุดพร้อม error และทิ้งคำตอบที่ยืนยันเจ้าของไม่ได้
 
@@ -290,6 +300,8 @@ Extension อ่านเนื้อคำตอบที่แสดงบน�
 ส่วนท้ายที่ยังไม่พบตัวคั่นจะถูกส่งเมื่อมีข้อความเพิ่มหรือเมื่องานจบ
 
 - เริ่มสตรีมได้เมื่อเว็บแสดง **เนื้อคำตอบ** แล้ว; ช่วง thinking ที่ยังไม่มีคำตอบจึงอาจเงียบ
+- ใน agent run ช่วงเงียบประมาณ 8 วินาทีก่อนคำตอบสุดท้ายมักเป็นเวลาที่โมเดลคิดกับ prompt ขนาดใหญ่
+  ไม่ใช่ bridge หรือ extension; ทดสอบ `/ask` ตรงแล้วข้อความโตทุกประมาณ 0.5 วินาที
 - นี่คือ DOM streaming ไม่ใช่ token stream โดยตรงจากโมเดล จังหวะขึ้นกับการ render ของเว็บ
 - หากข้อความยาวไม่มี whitespace อาจต้องรอจนพบตัวคั่นหรือจนงานจบ
 - หากเว็บย้อนแก้ส่วนที่ CLI พิมพ์แล้ว CLI อาจพัก partial output และส่งคำตอบฉบับเต็มเมื่อจบ
