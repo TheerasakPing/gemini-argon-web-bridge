@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 
 const source=readFileSync(new URL('../extension/content.js',import.meta.url),'utf8');
-function fixture({draft='',generating=false,hiddenStop=null,hiddenStopParent=null,paragraphs=false,changingStatus=false,onTick,initialPath='/app/owned',newQueries,buttonDisabled=false}={}) {
+function fixture({draft='',generating=false,hiddenStop=null,hiddenStopParent=null,paragraphs=false,changingStatus=false,onTick,initialPath='/app/owned',newQueries,buttonDisabled=false,secondaryComposer=false}={}) {
   let listener, clicks=0, ticks=0, now=1000, delivered; const messages=[]; const inserted=[];
   const result=new Promise(resolve=>{delivered=resolve;});
   const node={getClientRects:()=>[{}]};
@@ -25,6 +25,9 @@ function fixture({draft='',generating=false,hiddenStop=null,hiddenStopParent=nul
   const button={...node,disabled:buttonDisabled,getAttribute:()=>null,click(){clicks++;input.innerText='';}};
   const events = {};
   const location = {origin:'https://gemini.google.com',pathname:initialPath,search:''};
+  const secondary={...node,innerText:'',focus(){},dispatchEvent(){}};
+  const closest=selector=>selector==='rich-textarea' ? node : null;
+  input.closest=closest;
   const context=vm.createContext({
     Date:class extends Date {static now(){return now;}},
     setTimeout(fn,ms){now+=ms;ticks++;onTick?.({ticks,location,input,events});queueMicrotask(fn);},
@@ -35,7 +38,7 @@ function fixture({draft='',generating=false,hiddenStop=null,hiddenStopParent=nul
     window:{getSelection:()=>({removeAllRanges(){},addRange(){}})},
     document:{
       querySelectorAll(selector){
-        if(selector.startsWith('rich-textarea')) return [input];
+        if(selector.startsWith('rich-textarea')) return secondaryComposer ? [secondary,input] : [input];
         if(selector.startsWith('button.stop')) return generating || (clicks && ticks<3) ? [node] : (hiddenStop || hiddenStopParent) ? [hidden]:[];
         if(selector.startsWith('button.send')) return [button];
         if(selector==='model-response') return clicks ? [old,fresh]:[old];
@@ -154,6 +157,15 @@ test('force stashes an unsent draft, sends the prompt, then restores the draft',
 test('doctor reports which selectors resolve',()=>{
   const report=fixture().send({type:'argon:doctor'});
   assert.equal(report.editor,true); assert.equal(report.send,true); assert.equal(report.stop,false);
+});
+
+test('secondary composer does not make a stable main composer look changed',async()=>{
+  const f=fixture({secondaryComposer:true});
+  f.send({type:'argon:run',task:{id:'stable-composer',prompt:'hello',deadline:170000}});
+  const delivered=await f.result;
+  assert.equal(delivered.result.text,'NEW ANSWER');
+  assert.equal(f.clicks,1);
+  assert.deepEqual(f.inserted,['hello']);
 });
 
 test('multi-line prompts survive the composer turning newlines into paragraphs',async()=>{

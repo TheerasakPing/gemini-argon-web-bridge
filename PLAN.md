@@ -470,3 +470,21 @@ live `run_command` ผ่านหลังแก้ interpreter แล้วต
   `https://gemini.google.com/app` with a ready, empty composer. No quota or
   browser-crash conclusion is supported by current evidence.
 - No further Gemini submissions were made after that failure.
+
+### 2026-10-16 — Live round e91b53e and secondary composer fix
+
+- With the stronger final-stream gate, Brave Beta tab `1869337636` passed live
+  cases 1–8 consecutively. Every passed case completed 3 read-only tools, kept
+  the disposable fixture unchanged, inferred semantic facts correctly, and
+  reconstructed the final answer exactly from running/generating deltas in one
+  final job. Report: `/tmp/argon-live-e91b53e-full/report.json`.
+- Case 9 failed before any tool with `Gemini conversation composer changed
+  during job; result discarded`. The page still showed the submitted prompt and
+  Gemini kept generating. This suggests Gemini exposed an adjacent secondary
+  composer element while the main rich-textarea composer remained stable.
+- Changed `editor()` to select the visible composer inside `rich-textarea`
+  first, then the last visible main-page editor, instead of the first matching
+  contenteditable. Added a fixture regression for a secondary empty composer;
+  Node suite passed 68/68.
+- Live full-gate is therefore 8 passed / 1 failed before stopping, and does not
+  yet meet 9/10. The old tab continues generating, so no retry was submitted.

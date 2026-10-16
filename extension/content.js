@@ -25,7 +25,14 @@
     return true;
   };
   const first = selector => [...document.querySelectorAll(selector)].find(visible);
-  const editor = () => first('rich-textarea [contenteditable="true"], [contenteditable="true"][role="textbox"]');
+  const composerSelector = 'rich-textarea [contenteditable="true"], [contenteditable="true"][role="textbox"]';
+  // Google can temporarily expose both the chat composer and a composer retained by
+  // an adjacent input surface. Prefer the one inside rich-textarea, then the visible
+  // editor closest to the document end, where Gemini renders its main composer.
+  const editor = () => {
+    const editors = [...document.querySelectorAll(composerSelector)].filter(visible);
+    return editors.find(el => Boolean(el.closest?.('rich-textarea'))) || editors.at(-1);
+  };
   const stop = () => first('button.stop-button, button[data-test-id="stop-button"], button[aria-label*="Stop"], button[aria-label*="หยุด"]');
   const send = () => first('button.send-button, button[data-test-id="send-button"], button[aria-label="Send message"], button[aria-label="ส่งข้อความ"]');
   const model = () => first('[data-test-id="bard-mode-menu-button"], .model-switcher, button[aria-label*="model"]')?.innerText?.trim() || 'Selected in Gemini web (unverified)';
