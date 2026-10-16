@@ -265,7 +265,7 @@ python3 tests/live_harness.py \
 
 ถ้าติดตั้งทับ daemon รุ่นเก่าแล้ว `argon agent` แจ้งว่า protocol ไม่พร้อม
 ให้รอ jobs จบก่อน restart daemon จากนั้นตรวจ `argon --status` ว่ามี `agentProtocol: 1`
-หลังอัปเดตเป็น extension 1.1.10 ให้รัน `python3 scripts/install.py` ก่อน (Brave โหลดจากโฟลเดอร์ติดตั้ง) แล้วกด Reload ใน `brave://extensions` และ refresh Gemini
+หลังอัปเดตเป็น extension 1.1.11 ให้รัน `python3 scripts/install.py` ก่อน (Brave โหลดจากโฟลเดอร์ติดตั้ง) แล้วกด Reload ใน `brave://extensions` และ refresh Gemini
 เพื่อเปิดใช้การผูกงานกับ numeric tab ID, document และ conversation
 หากผู้ใช้เปลี่ยนหน้า ปิดแท็บ หรือ reload ระหว่างตอบ งานจะหยุดพร้อม error และทิ้งคำตอบที่ยืนยันเจ้าของไม่ได้
 

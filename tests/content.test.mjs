@@ -75,6 +75,36 @@ test('unsent prompt is removed when the send button stays unavailable',async()=>
   assert.match((await f.result).result.error,/send button unavailable/);
   assert.equal(f.clicks,0); assert.equal(f.input.innerText,'');
 });
+test('refusing a pre-existing draft identical to the prompt preserves that draft',async()=>{
+  const f=fixture({draft:'hello'});
+  f.send({type:'argon:run',task:{id:'same-draft',prompt:'hello',deadline:170000}});
+  assert.match((await f.result).result.error,/unsent draft/);
+  assert.equal(f.input.innerText,'hello'); assert.equal(f.clicks,0);
+});
+test('refusal preserves a draft with equivalent normalized whitespace',async()=>{
+  const f=fixture({draft:'hello\n\nworld'});
+  f.send({type:'argon:run',task:{id:'spaced-draft',prompt:'hello world',deadline:170000}});
+  assert.match((await f.result).result.error,/unsent draft/);
+  assert.equal(f.input.innerText,'hello\n\nworld'); assert.equal(f.clicks,0);
+});
+test('busy refusal preserves an existing draft matching the prompt',async()=>{
+  const f=fixture({draft:'hello',generating:true});
+  f.send({type:'argon:run',task:{id:'busy-draft',prompt:'hello',deadline:170000}});
+  assert.match((await f.result).result.error,/generating another/);
+  assert.equal(f.input.innerText,'hello'); assert.equal(f.clicks,0);
+});
+test('failed submission restores a stashed draft after removing its own prompt',async()=>{
+  const f=fixture({draft:'original draft',buttonDisabled:true});
+  f.send({type:'argon:run',task:{id:'restore',prompt:'hello',deadline:170000,options:{force:true}}});
+  assert.match((await f.result).result.error,/send button unavailable/);
+  assert.equal(f.input.innerText,'original draft'); assert.equal(f.clicks,0);
+});
+test('failed submission preserves user whitespace changes to the inserted prompt',async()=>{
+  const f=fixture({buttonDisabled:true,onTick({input}){input.innerText='hello ';}});
+  f.send({type:'argon:run',task:{id:'changed',prompt:'hello',deadline:170000}});
+  assert.match((await f.result).result.error,/send button unavailable/);
+  assert.equal(f.input.innerText,'hello '); assert.equal(f.clicks,0);
+});
 test('content refuses submission while another response is generating',async()=>{
   const f=fixture({generating:true});
   f.send({type:'argon:run',task:{id:'busy',prompt:'hello',deadline:170000}});

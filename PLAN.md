@@ -1,6 +1,6 @@
 # แผนสร้าง Argon Agent Harness
 
-สถานะ: ส่งมอบ Rust harness v0.1.0 แบบ experimental; live gate 10 งานผ่าน 10/10 (round 11, Extension 1.1.8, Flash-Lite; โหมดอ่านอย่างเดียว) — live แบบแก้ไฟล์ผ่าน (`edit_file` อนุมัติและไฟล์เปลี่ยนจริง, ตรวจด้วย diff และ test นอก harness); live `run_command` ยังไม่ผ่านเพราะ macOS sandbox บล็อก Homebrew python3 (dyld)
+สถานะ: Rust harness v0.1.0 แบบ experimental; live gate เคยผ่าน 10/10 (round 11, Extension 1.1.8, Flash-Lite; อ่านอย่างเดียว) และเคยยืนยัน edit/run_command ตามบันทึกด้านล่างแล้ว รุ่นปัจจุบัน Extension 1.1.11 ยังต้องยืนยัน live ใหม่: smoke ล่าสุดหยุดก่อน tools เพราะปุ่มส่งใช้งานไม่ได้ และ bridge รายงาน draft ค้าง
 วันที่: 16 ตุลาคม 2026  
 ฐานโค้ด: Argon Web Bridge, commit `cd7d562`
 
@@ -364,10 +364,30 @@ parser/provider/read loop และ opt-in editing/commands ทำแล้ว�
 - ผล round 11 (`/tmp/argon-live-acceptance-20261016-round11/report.json`): 10/10 มี partial จาก job เดียวกันก่อน final; gate 9/10 ผ่านสำหรับงานอ่านอย่างเดียว
 - ข้อจำกัด: โมเดลหน้าเว็บ Flash-Lite, modelVerified=false; ผ่านหลังปรับ prompt/ข้อสอบ; ยังไม่ติดป้าย production-ready
 
-### Streaming, auto-detect, sandbox python และ Extension 1.1.10 — 2026-10-16
+### Streaming, auto-detect, sandbox python และ Extension 1.1.9 — 2026-10-16
 - Streaming: harness ถอด `final.text` ที่ยังมาไม่ครบ (รวม `\uXXXX`/surrogate) จึงพิมพ์คำตอบตามช่องว่างก่อน envelope ปิด; ตัวเทียบ "แสดงแล้ว" เทียบเฉพาะตัวอักษร/ตัวเลข เพราะ Gemini ตัด markdown
 - วัด bridge ตรง (`/ask` แล้ว poll `/jobs/<id>`): partial โตทุก ~0.5 วินาทีหลังเริ่ม generating ดังนั้นช่วงเงียบ ~8 วินาทีใน agent run มาจากโมเดลคิดกับ prompt ใหญ่ ไม่ใช่ bridge/extension; `done` ช้ากว่าข้อความสุดท้าย ~2.5 วินาทีเพราะรอข้อความนิ่ง
 - Auto-detect: prompt มี PROJECT OVERVIEW (จำนวนไฟล์, stack จาก manifest, docs, top dirs) คำนวณจากรายชื่อไฟล์ทั้งหมด ไม่ใช่เฉพาะ 160 ไฟล์แรก
-- Overlay 1.1.10: บรรทัดข้อความสด + เคอร์เซอร์; ต้องติดตั้งด้วย `scripts/install.py` ก่อน Reload เพราะ Brave โหลดจากโฟลเดอร์ติดตั้ง
+- Overlay 1.1.9: บรรทัดข้อความสด + เคอร์เซอร์; ต้องติดตั้งด้วย `scripts/install.py` ก่อน Reload เพราะ Brave โหลดจากโฟลเดอร์ติดตั้ง
 - Sandbox: `python`/`python3` เปล่าๆ ถูกแทนด้วย `/Library/Developer/CommandLineTools/usr/bin/python3` (Homebrew โดนบล็อก, `/usr/bin/python3` เป็น xcrun shim ที่ต้องเขียน cache); อนุญาตอ่าน CommandLineTools อย่างเดียว; live: `python3 test_calc.py` exit 0
 - ช่องว่างที่ยังเปิด: โมเดลบางครั้งเขียนคำตอบไม่ตรงกันระหว่าง prose กับ `final.text` (พิมพ์สองชุด); ยังไม่มี multi-lane/subagent; Rust ครอบคลุม harness แล้ว ส่วน bridge/extension คงเป็น Node/JS เพราะผูกกับ Chrome
+
+### Failed-send draft cleanup และ Extension 1.1.11 — 2026-10-16
+
+- Live smoke `/tmp/argon-live-smoke/report.json`: 0/1, 44.09 วินาที, turns/tools 0,
+  `Gemini send button unavailable; check account limit`. ข้อความนี้ไม่ยืนยันว่า quota เต็ม;
+  ยังไม่ได้ตรวจ DOM จริงเพื่อแยก account limit จาก selector หรือสถานะหน้าเว็บ
+- Extension 1.1.10 เพิ่ม cleanup หลังส่งไม่สำเร็จ แต่ทีมรีวิวพบว่า draft เดิมที่ตรงกับ prompt
+  ถูกลบแม้งานถูกปฏิเสธก่อน insertion; regression ยืนยันทั้งข้อความตรงตัวและ whitespace ที่ normalize เท่ากัน
+- Extension 1.1.11 บันทึกข้อความหลัง insertion/verification สำเร็จเท่านั้น
+  และล้างได้เมื่อยังไม่ submit, ข้อความตรง snapshot ทุกตัวอักษร และ ownership ยังถูกต้อง
+  จึงรักษา draft เดิมและการแก้ whitespace ของผู้ใช้ระหว่างรอปุ่มส่ง
+- เพิ่ม regression สำหรับ identical draft, normalized whitespace, busy refusal, force restore
+  และผู้ใช้แก้ draft ระหว่างรอ; ไม่ส่ง prompt จริงเพิ่มขณะ bridge ยังไม่พร้อม
+- `/health` ไม่มี extension version จึงใช้ยืนยันเวอร์ชันที่ browser โหลดไม่ได้
+  ต้องแยกเวอร์ชัน source/install ออกจากเวอร์ชัน runtime
+- ทีมรีวิวแยกยืนยันปิด HIGH เดิมและไม่พบ blocker เพิ่มในส่วน cleanup;
+  Node 63/63, Python 28/28 ผ่านในรอบนี้ ไม่รัน Rust ซ้ำเพราะไม่มี Rust เปลี่ยน
+- ติดตั้งด้วย `scripts/install.py --no-start --no-path` และตรวจ hash ของ content/manifest ตรง source
+  `argon --status` หลังติดตั้งรายงาน extensionConnected=false, clients=[], ready=false,
+  queue=0 และไม่มี lease จึงยังไม่มี live gate สำหรับ 1.1.11

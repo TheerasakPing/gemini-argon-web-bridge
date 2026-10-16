@@ -218,7 +218,7 @@
     };
     const options = job.options || {};
     const view = createOverlay();
-    let lastPhase = '', lastPartial = '', lastSent = 0, stashedDraft = null;
+    let lastPhase = '', lastPartial = '', lastSent = 0, stashedDraft = null, insertedDraft = null;
     const report = (phase, partial = '') => {
       view?.show(phase, partial.length, partial);
       const now = Date.now();
@@ -243,6 +243,7 @@
       report('typing');
       replaceAll(input, job.prompt);
       if (squash(input.innerText) !== squash(job.prompt)) throw new Error('Prompt insertion verification failed; inspect draft');
+      insertedDraft = input.innerText;
       let button;
       for (let i=0;i<40;i++) { assertOwnership(); button=send(); if (button && !button.disabled && button.getAttribute('aria-disabled') !== 'true') break; await sleep(250); }
       if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') throw new Error('Gemini send button unavailable; check account limit');
@@ -273,7 +274,7 @@
       // A prompt we typed but never submitted would leave the composer blocked; remove only that.
       try {
         const input = editor();
-        if (!submitted && input && squash(input.innerText) === squash(job.prompt) && assertOwnership()) {
+        if (!submitted && insertedDraft !== null && input && input.innerText === insertedDraft && assertOwnership()) {
           input.focus();
           const selection = window.getSelection(); const range = document.createRange();
           range.selectNodeContents(input); selection.removeAllRanges(); selection.addRange(range);
