@@ -363,3 +363,11 @@ parser/provider/read loop และ opt-in editing/commands ทำแล้ว�
 - ปรับข้อสอบ: ระบุ `intent` ให้ชัด, เว้น 8 วินาทีระหว่างเคส, เพิ่ม `--keep-going`
 - ผล round 11 (`/tmp/argon-live-acceptance-20261016-round11/report.json`): 10/10 มี partial จาก job เดียวกันก่อน final; gate 9/10 ผ่านสำหรับงานอ่านอย่างเดียว
 - ข้อจำกัด: โมเดลหน้าเว็บ Flash-Lite, modelVerified=false; ผ่านหลังปรับ prompt/ข้อสอบ; ยังไม่ติดป้าย production-ready
+
+### Streaming, auto-detect, sandbox python และ Extension 1.1.9 — 2026-10-16
+- Streaming: harness ถอด `final.text` ที่ยังมาไม่ครบ (รวม `\uXXXX`/surrogate) จึงพิมพ์คำตอบตามช่องว่างก่อน envelope ปิด; ตัวเทียบ "แสดงแล้ว" เทียบเฉพาะตัวอักษร/ตัวเลข เพราะ Gemini ตัด markdown
+- วัด bridge ตรง (`/ask` แล้ว poll `/jobs/<id>`): partial โตทุก ~0.5 วินาทีหลังเริ่ม generating ดังนั้นช่วงเงียบ ~8 วินาทีใน agent run มาจากโมเดลคิดกับ prompt ใหญ่ ไม่ใช่ bridge/extension; `done` ช้ากว่าข้อความสุดท้าย ~2.5 วินาทีเพราะรอข้อความนิ่ง
+- Auto-detect: prompt มี PROJECT OVERVIEW (จำนวนไฟล์, stack จาก manifest, docs, top dirs) คำนวณจากรายชื่อไฟล์ทั้งหมด ไม่ใช่เฉพาะ 160 ไฟล์แรก
+- Overlay 1.1.9: บรรทัดข้อความสด + เคอร์เซอร์; ต้องติดตั้งด้วย `scripts/install.py` ก่อน Reload เพราะ Brave โหลดจากโฟลเดอร์ติดตั้ง
+- Sandbox: `python`/`python3` เปล่าๆ ถูกแทนด้วย `/Library/Developer/CommandLineTools/usr/bin/python3` (Homebrew โดนบล็อก, `/usr/bin/python3` เป็น xcrun shim ที่ต้องเขียน cache); อนุญาตอ่าน CommandLineTools อย่างเดียว; live: `python3 test_calc.py` exit 0
+- ช่องว่างที่ยังเปิด: โมเดลบางครั้งเขียนคำตอบไม่ตรงกันระหว่าง prose กับ `final.text` (พิมพ์สองชุด); ยังไม่มี multi-lane/subagent; Rust ครอบคลุม harness แล้ว ส่วน bridge/extension คงเป็น Node/JS เพราะผูกกับ Chrome
