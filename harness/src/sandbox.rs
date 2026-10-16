@@ -23,7 +23,8 @@ fn profile(root: &Path) -> Result<String> {
 (allow file-read-metadata)
 (allow file-read-data (literal "/"))
 (allow file-read* (subpath "/System") (subpath "/usr") (subpath "/bin")
- (subpath "/sbin") (subpath "/Library/Apple") (subpath "/private/var/db/dyld"))
+ (subpath "/sbin") (subpath "/Library/Apple")
+ (subpath "/Library/Developer/CommandLineTools") (subpath "/private/var/db/dyld"))
 (allow file-read* file-write* (subpath "{escaped}"))
 (allow file-read* (literal "/dev/null") (literal "/dev/urandom")
  (literal "/dev/random") (literal "/dev/fd") (subpath "/dev/fd"))
@@ -33,6 +34,18 @@ fn profile(root: &Path) -> Result<String> {
 }
 
 /// Failure never falls back to unrestricted execution.
+/// A bare python/python3 would resolve through PATH to Homebrew, whose dylibs the sandbox blocks,
+/// and /usr/bin/python3 is an xcrun shim that needs a writable cache. Use the real system binary.
+#[cfg(target_os = "macos")]
+fn resolve_python(program: &str) -> String {
+    const REAL: &str = "/Library/Developer/CommandLineTools/usr/bin/python3";
+    if matches!(program, "python" | "python3") && Path::new(REAL).is_file() {
+        REAL.into()
+    } else {
+        program.into()
+    }
+}
+
 pub fn command(root: &Path, argv: &[String]) -> Result<Command> {
     ensure!(!argv.is_empty(), "Empty sandbox command");
     #[cfg(target_os = "macos")]
@@ -42,6 +55,8 @@ pub fn command(root: &Path, argv: &[String]) -> Result<Command> {
             "macOS sandbox-exec is unavailable"
         );
         let mut cmd = Command::new("/usr/bin/sandbox-exec");
+        let mut argv = argv.to_vec();
+        argv[0] = resolve_python(&argv[0]);
         cmd.arg("-p").arg(profile(root)?).arg("--").args(argv);
         Ok(cmd)
     }
@@ -89,6 +104,29 @@ mod tests {
             still_running,
             "sandbox signalled an external sibling process"
         );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn sandboxed_python3_runs_system_interpreter() {
+        if !Path::new("/Library/Developer/CommandLineTools/usr/bin/python3").is_file() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let out = command(
+            root.path(),
+            &[
+                "python3".into(),
+                "-I".into(),
+                "-c".into(),
+                "print(6*7)".into(),
+            ],
+        )
+        .unwrap()
+        .current_dir(root.path())
+        .output()
+        .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "42", "{out:?}");
     }
 
     #[test]
