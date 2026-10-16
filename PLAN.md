@@ -450,3 +450,23 @@ live `run_command` ผ่านหลังแก้ interpreter แล้วต
   cancellation coverage รอบนี้เป็น mock; การทดลอง SIGINT/process-group เพิ่มของ reviewer
   พบ PermissionError จึงไม่ใช่หลักฐานผ่าน real cancellation
   ติดตั้ง CLI ด้วย installer และตรวจ SHA256 ตรง source แล้ว
+
+### 2026-10-16 — Live round after final-stream gate
+
+- Added acceptance-level final-stream verification: the final model turn must
+  stream at least two real `running/generating` deltas from one job, reconstruct
+  exactly to `final.text`, and honor `assistant_reset` as replacement. A barrier
+  after the latest `tool_result`/`protocol_error` prevents tool-turn progress
+  from satisfying the final-answer gate.
+- Added fault coverage for buffered final output, tool-only progress, missing
+  tails, duplicate deltas, exact and incomplete resets, and stale pre-tool
+  deltas. Python suite passed 36/36; commit `e91b53e`.
+- Brave Beta round against explicit tab `1869337091` stopped at case 1 after
+  all three required reads completed. The final fresh-chat job
+  `51f44b98-e122-489c-8d0f-42893a4b6256` failed with
+  `Could not open a new Gemini chat; inspect the tab`. The fixture remained
+  unchanged and the report is `/tmp/argon-live-369e20b-full/report.json`.
+- The tab subsequently disappeared from `/health`, then returned on
+  `https://gemini.google.com/app` with a ready, empty composer. No quota or
+  browser-crash conclusion is supported by current evidence.
+- No further Gemini submissions were made after that failure.
