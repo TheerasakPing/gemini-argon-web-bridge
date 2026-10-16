@@ -238,7 +238,15 @@ pub fn run(
             session.save()?;
             let remaining = Duration::from_secs(limits.seconds).saturating_sub(started.elapsed());
             let answer = bridge.wait(&job, remaining, cancelled, &mut |snapshot, status, phase| {
-                let prefix = protocol::visible_prefix(snapshot);
+                let prose = protocol::visible_prefix(snapshot);
+                // With no prose before the envelope, the answer lives in final.text; stream that as it arrives.
+                let live;
+                let prefix: &str = if prose.trim().is_empty() {
+                    live = protocol::live_final_text(snapshot).unwrap_or_default();
+                    &live
+                } else {
+                    prose
+                };
                 if prefix.starts_with(&visible) {
                     let delta = &prefix[visible.len()..];
                     if !delta.is_empty() {
