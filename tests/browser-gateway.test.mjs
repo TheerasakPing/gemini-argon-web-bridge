@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {join, resolve} from 'node:path';
 import {createBridge} from '../bridge/server.mjs';
 import {openAIProviderFromEnv} from '../bridge/cloud-gateway.mjs';
 import {BROWSER_SITES, getBrowserSite} from '../bridge/browser-sites.mjs';
@@ -36,7 +37,8 @@ test('headless launcher options fail closed on unsupported sites or ChatGPT auto
 test('browser creates a separate Argon-owned profile and never points to personal Chrome profile',()=>{
   const opts=parseBrowserArgs(['--headed','--site=gemini','--check']);
   const p=browserProfilePath('gemini',{ARGON_BROWSER_PROFILE_ROOT:'/tmp/argon-isolated'},'linux','/home/person');
-  assert.equal(p,'/tmp/argon-isolated/gemini');
+  assert.equal(p,join(resolve('/tmp/argon-isolated'),'gemini'));
+  assert.notEqual(p,join(resolve('/tmp/argon-isolated'),'chatgpt'));
   const spec=browserLaunchPlan(opts,{root:'/tmp/argon-project',env:{ARGON_BROWSER_PROFILE_ROOT:'/tmp/argon-isolated'},platform:'linux',home:'/home/person'});
   assert.equal(spec.profile,p);
   assert.equal(spec.browserRelay,true);
