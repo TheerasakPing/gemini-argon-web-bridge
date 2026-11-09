@@ -41,6 +41,27 @@ Argon เชื่อม CLI เข้ากับแท็บ Gemini ที่�
 | **ติดตามงานได้** | มีสถานะ CLI, animation บนหน้าเว็บ, popup และคำสั่งตรวจ selectors |
 | **ควบคุมงานในเครื่อง** | Queue ทำงานทีละงาน พร้อม claim token ป้องกันการรับงานซ้ำ |
 
+## Multi-Site Browser Gateway + Headless (Phase 2)
+
+เพิ่ม **Playwright Chromium Headed/Headless** สำหรับ Gemini Web Extension เดิม และเปิดหน้า ChatGPT ในโหมด manual-browser
+(ไม่ดึงคำตอบจากเว็บ ChatGPT อัตโนมัติ) พร้อมรองรับ OpenAI API ทางการผ่าน `openai/<model-id>`
+โดยใช้ `ARGON_OPENAI_API_KEY` ซึ่งแยกจากสมาชิก ChatGPT และแยกจาก Argon Bearer Token
+
+```sh
+# ติดตั้งแพ็กเกจ Playwright เพิ่มในโฟลเดอร์ติดตั้ง Argon
+npm install --no-save playwright
+npx playwright install chromium
+
+# ต้องเปิดแบบมีหน้าต่างก่อน เพื่อเข้าสู่ระบบในโปรไฟล์ใหม่
+argon browser --headed --site=gemini
+
+# แล้วจึงเรียกโหมดไม่มีหน้าต่างด้วยโปรไฟล์เดียวกัน
+argon browser --headless --site=gemini
+```
+
+ตรวจสอบเว็บไซต์และความสามารถที่เปิดใช้งานด้วย `GET /v1/browser/sites` (ต้องใช้ Argon Bearer Token)
+รายละเอียดการติดตั้งและข้อจำกัด: **[Multi-Site Browser Gateway](docs/MULTISITE_BROWSER_GATEWAY.md)**
+
 ## Local AI Gateway (ใหม่: Phase 1)
 
 Argon รองรับการเลือกโมเดลจาก **Ollama** และ **LM Studio** ที่รันบนเครื่องเดียวกัน ผ่าน OpenAI-compatible API เดิม
