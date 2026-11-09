@@ -5,6 +5,30 @@ on:
 permissions:
   contents: read
 jobs:
+  headless-smoke:
+    name: Chromium headless extension smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-save playwright
+      - run: npx playwright install --with-deps --no-shell chromium
+      - run: node tests/headless-extension-smoke.mjs
+  browser-gateway:
+    name: Browser Gateway (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node --test tests/browser-gateway.test.mjs
   local-gateway:
     name: Local Gateway (${{ matrix.os }})
     strategy:

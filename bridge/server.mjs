@@ -1,4 +1,6 @@
 import http from 'node:http';
+import {openAIProviderFromEnv} from './cloud-gateway.mjs';
+import {publicBrowserSites} from './browser-sites.mjs';
 import {localProvidersFromEnv, validateLocalProviders, resolveLocalModel, discoverLocalModels, proxyLocalChat} from './local-gateway.mjs';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync, writeFileSync, appendFileSync, existsSync, renameSync, statSync } from 'node:fs';
@@ -31,9 +33,10 @@ const flatten = messages => {
   return items.length === 1 ? items[0].text : items.map(m => `${m.role}: ${m.text}`).join('\n\n');
 };
 
-export function createBridge({ token, timeoutMs = 180000, dataDir = null, localProviders = null } = {}) {
+export function createBridge({ token, timeoutMs = 180000, dataDir = null, localProviders = null, cloudProvidersOverride = null } = {}) {
   if (!token) throw new Error('Bridge token is required');
   const providers = localProviders === null ? localProvidersFromEnv() : validateLocalProviders(localProviders);
+  const cloudProviders = cloudProvidersOverride === null ? openAIProviderFromEnv() : cloudProvidersOverride;
   const jobs = new Map(), streams = new Set(), clients = new Map();
   const queueFile = dataDir && join(dataDir, 'queue.json');
   const historyFile = dataDir && join(dataDir, 'history.jsonl');
@@ -190,9 +193,15 @@ export function createBridge({ token, timeoutMs = 180000, dataDir = null, localP
         if (needle) items = items.filter(i => `${i.prompt}\n${i.text || ''}`.toLowerCase().includes(needle));
         return json(200, {items:items.slice(-limit)});
       }
+      if (req.method === 'GET' && url.pathname === '/v1/browser/sites') {
+        return json(200, {object:'list', data:publicBrowserSites(), openAIConfigured:cloudProviders.length > 0});
+      }
       if (req.method === 'GET' && url.pathname === '/v1/models') {
-        const localModels = await discoverLocalModels(providers);
-        return json(200, {object:'list', data:[{id:'gemini-web', object:'model', owned_by:'argon-bridge'}, ...localModels]});
+        const [localModels, remoteModels] = await Promise.all([
+          discoverLocalModels(providers),
+          discoverLocalModels(cloudProviders, 5000),
+        ]);
+        return json(200, {object:'list', data:[{id:'gemini-web', object:'model', owned_by:'argon-bridge'}, ...localModels, ...remoteModels]});
       }
       if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
         const b = await body();
@@ -200,10 +209,11 @@ export function createBridge({ token, timeoutMs = 180000, dataDir = null, localP
         const selected = b.model === undefined ? 'gemini-web' : b.model;
         if (typeof selected !== 'string') return err(400, 'model must be a string', 'invalid_request_error');
         const local = resolveLocalModel(selected, providers);
-        if (selected !== 'gemini-web' && !local) return err(404, 'Unknown model: ' + selected.slice(0, 100), 'model_not_found');
-        if (local) {
+        const cloud = resolveLocalModel(selected, cloudProviders);
+        if (selected !== 'gemini-web' && !local && !cloud) return err(404, 'Unknown model: ' + selected.slice(0, 100), 'model_not_found');
+        if (local || cloud) {
           if (!Array.isArray(b.messages) || !b.messages.length) return err(400, 'messages must be a non-empty array', 'invalid_request_error');
-          return await proxyLocalChat({req, res, payload:b, route:local});
+          return await proxyLocalChat({req, res, payload:b, route:local || cloud});
         }
         if (currentLease()) return json(409, {error:'Bridge reserved by an agent session'});
         const prompt = Array.isArray(b.messages) ? flatten(b.messages) : '';

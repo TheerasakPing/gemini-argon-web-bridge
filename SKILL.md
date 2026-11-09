@@ -9,6 +9,28 @@ For `/argon <prompt>`, run `argon` with the prompt as one safely quoted argument
 For `/argon --status`, run `argon --status` and report its actual readiness fields.
 The Python CLI auto-starts the loopback Node server. No npm or pip packages required.
 
+## Browser gateway and official OpenAI API provider
+
+`argon browser --check` reports which browser site modes are supported.
+`argon browser --headed --site=gemini` launches a separate persistent Chromium profile
+to sign in interactively. Once that dedicated profile is initialized, run
+`argon browser --headless --site=gemini` to load the existing Gemini extension
+without a visible browser window. Playwright is optional; install it in the Argon
+installation folder (`npm install --no-save playwright && npx playwright install chromium`).
+The browser launcher is a foreground process. Headless login and live Gemini readiness
+are not guaranteed; verify `argon --status`, never bypass an authentication challenge.
+
+`argon browser --headed --site=chatgpt` opens ChatGPT for **manual browsing only**.
+No ChatGPT web output automation or scraping is implemented. The official OpenAI API
+is exposed by model IDs `openai/<model-id>` through the existing OpenAI-compatible
+`/v1/chat/completions` route when `ARGON_OPENAI_API_KEY` is set in the bridge
+server's environment **before startup**. OpenAI API usage is billed separately from
+ChatGPT subscriptions. Never read or reveal the API key; the browser extension
+must not receive that key. `GET /v1/browser/sites` lists supported capability modes.
+See `docs/MULTISITE_BROWSER_GATEWAY.md`.
+
+
+
 ## Experimental Rust harness
 
 `argon agent "<task>"` runs a multi-turn coding harness, read-only by default.

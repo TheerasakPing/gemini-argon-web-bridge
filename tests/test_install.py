@@ -48,6 +48,9 @@ class InstallTests(unittest.TestCase):
             self.assertTrue((bin_dir / 'argon').stat().st_mode & 0o111)
             self.assertTrue((root / 'bin/argon.cmd').exists())
             self.assertTrue((root / 'bridge/local-gateway.mjs').is_file())
+            self.assertTrue((root / 'bridge/cloud-gateway.mjs').is_file())
+            self.assertTrue((root / 'bridge/browser-sites.mjs').is_file())
+            self.assertTrue((root / 'scripts/browser-gateway.mjs').is_file())
             self.assertFalse((home / '.zshrc').exists())
             if os.name != 'nt':
                 self.assertEqual((root / 'bridge/token').stat().st_mode & 0o777, 0o600)

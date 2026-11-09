@@ -12,8 +12,9 @@ import sys
 
 SOURCE = Path(__file__).resolve().parents[1]
 FILES = (
-    'SKILL.md', 'bridge/server.mjs', 'bridge/local-gateway.mjs', 'mcp/server.mjs',
-    'scripts/gemini_argon_bridge.py', 'scripts/install.py',
+    'SKILL.md', 'bridge/server.mjs', 'bridge/local-gateway.mjs',
+    'bridge/cloud-gateway.mjs', 'bridge/browser-sites.mjs', 'mcp/server.mjs',
+    'scripts/gemini_argon_bridge.py', 'scripts/browser-gateway.mjs', 'scripts/install.py',
     'extension/manifest.json', 'extension/background.js', 'extension/content.js',
     'extension/popup.html', 'extension/popup.js',
     'bin/argon.cmd', 'bin/argon.ps1',
