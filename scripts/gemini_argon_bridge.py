@@ -657,6 +657,11 @@ def build_parser():
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'browser':
+        node = shutil.which('node')
+        if not node:
+            raise RuntimeError('Node.js not found in PATH')
+        return subprocess.call([node, str(ROOT / 'scripts/browser-gateway.mjs'), *sys.argv[2:]])
     if len(sys.argv) > 1 and sys.argv[1] in {'agent', 'sessions', 'resume', 'fork', 'recover'}:
         binary = ROOT / 'bin' / ('argon-harness.exe' if os.name == 'nt' else 'argon-harness')
         if not binary.is_file():
