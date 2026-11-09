@@ -33,10 +33,10 @@ const flatten = messages => {
   return items.length === 1 ? items[0].text : items.map(m => `${m.role}: ${m.text}`).join('\n\n');
 };
 
-export function createBridge({ token, timeoutMs = 180000, dataDir = null, localProviders = null } = {}) {
+export function createBridge({ token, timeoutMs = 180000, dataDir = null, localProviders = null, cloudProvidersOverride = null } = {}) {
   if (!token) throw new Error('Bridge token is required');
   const providers = localProviders === null ? localProvidersFromEnv() : validateLocalProviders(localProviders);
-  const cloudProviders = openAIProviderFromEnv();
+  const cloudProviders = cloudProvidersOverride === null ? openAIProviderFromEnv() : cloudProvidersOverride;
   const jobs = new Map(), streams = new Set(), clients = new Map();
   const queueFile = dataDir && join(dataDir, 'queue.json');
   const historyFile = dataDir && join(dataDir, 'history.jsonl');
