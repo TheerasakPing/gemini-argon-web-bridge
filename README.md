@@ -41,6 +41,24 @@ Argon เชื่อม CLI เข้ากับแท็บ Gemini ที่�
 | **ติดตามงานได้** | มีสถานะ CLI, animation บนหน้าเว็บ, popup และคำสั่งตรวจ selectors |
 | **ควบคุมงานในเครื่อง** | Queue ทำงานทีละงาน พร้อม claim token ป้องกันการรับงานซ้ำ |
 
+## Local AI Gateway (ใหม่: Phase 1)
+
+Argon รองรับการเลือกโมเดลจาก **Ollama** และ **LM Studio** ที่รันบนเครื่องเดียวกัน ผ่าน OpenAI-compatible API เดิม
+โดยไม่เปลี่ยนการทำงานของ `gemini-web` และไม่ต้องเปิด Gemini tab สำหรับคำขอที่ส่งไปยัง local model
+
+| Model ID | ปลายทาง |
+| :--- | :--- |
+| `gemini-web` | Gemini Web Extension เดิม |
+| `ollama/<model-id>` | Ollama บน `127.0.0.1:11434` |
+| `lmstudio/<model-id>` | LM Studio บน `127.0.0.1:1234` |
+
+ใช้ `GET /v1/models` เพื่อตรวจชื่อโมเดลจริง และ `POST /v1/chat/completions` เพื่อเรียกโมเดลแบบทั่วไปหรือ SSE
+ทุกคำขอยังต้องใช้ Bearer Token ของ Argon; gateway เชื่อมต่อ upstream ที่เป็น loopback เท่านั้น
+และไม่ส่งโทเค็น Argon ต่อไปยังโมเดลในเครื่อง
+
+รายละเอียดการเริ่มใช้ ค่าคอนฟิก ข้อจำกัด และแผนทดสอบ:
+**[Local AI Gateway Guide](docs/LOCAL_AI_GATEWAY.md)**
+
 ## สถานะการทดสอบ
 
 ผลที่ยืนยันเมื่อ **16 ตุลาคม 2026** สำหรับ extension **1.1.11**,

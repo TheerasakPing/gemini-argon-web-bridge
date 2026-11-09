@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {localProvidersFromEnv, validateLocalProviders, resolveLocalModel, discoverLocalModels, proxyLocalChat} from './local-gateway.mjs';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync, writeFileSync, appendFileSync, existsSync, renameSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -30,8 +31,9 @@ const flatten = messages => {
   return items.length === 1 ? items[0].text : items.map(m => `${m.role}: ${m.text}`).join('\n\n');
 };
 
-export function createBridge({ token, timeoutMs = 180000, dataDir = null } = {}) {
+export function createBridge({ token, timeoutMs = 180000, dataDir = null, localProviders = null } = {}) {
   if (!token) throw new Error('Bridge token is required');
+  const providers = localProviders === null ? localProvidersFromEnv() : validateLocalProviders(localProviders);
   const jobs = new Map(), streams = new Set(), clients = new Map();
   const queueFile = dataDir && join(dataDir, 'queue.json');
   const historyFile = dataDir && join(dataDir, 'history.jsonl');
@@ -189,19 +191,28 @@ export function createBridge({ token, timeoutMs = 180000, dataDir = null } = {})
         return json(200, {items:items.slice(-limit)});
       }
       if (req.method === 'GET' && url.pathname === '/v1/models') {
-        return json(200, {object:'list', data:[{id:'gemini-web', object:'model', owned_by:'argon-bridge'}]});
+        const localModels = await discoverLocalModels(providers);
+        return json(200, {object:'list', data:[{id:'gemini-web', object:'model', owned_by:'argon-bridge'}, ...localModels]});
       }
       if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
-        if (currentLease()) return json(409, {error:'Bridge reserved by an agent session'});
         const b = await body();
-        const prompt = Array.isArray(b.messages) ? flatten(b.messages) : '';
         const err = (status, message, type) => json(status, {error:{message, type}});
+        const selected = b.model === undefined ? 'gemini-web' : b.model;
+        if (typeof selected !== 'string') return err(400, 'model must be a string', 'invalid_request_error');
+        const local = resolveLocalModel(selected, providers);
+        if (selected !== 'gemini-web' && !local) return err(404, 'Unknown model: ' + selected.slice(0, 100), 'model_not_found');
+        if (local) {
+          if (!Array.isArray(b.messages) || !b.messages.length) return err(400, 'messages must be a non-empty array', 'invalid_request_error');
+          return await proxyLocalChat({req, res, payload:b, route:local});
+        }
+        if (currentLease()) return json(409, {error:'Bridge reserved by an agent session'});
+        const prompt = Array.isArray(b.messages) ? flatten(b.messages) : '';
         if (!prompt || prompt.length > MAX_PROMPT) return err(400, `messages must contain 1–${MAX_PROMPT} characters of text`, 'invalid_request_error');
         if (!liveClients().some(c => c.ready || (c.draft && b.argon_force === true))) return err(503, 'Gemini tab is not ready', 'bridge_unavailable');
         if (openJobs().length >= MAX_QUEUE) return err(429, 'Queue full', 'rate_limit_error');
         const job = enqueue(prompt, cleanOptions({newChat:b.argon_new_chat, force:b.argon_force, tab:b.argon_tab}));
         const id = 'chatcmpl-' + job.id, created = Math.floor(Date.now() / 1000);
-        const model = typeof b.model === 'string' ? b.model.slice(0, 100) : 'gemini-web';
+        const model = 'gemini-web';
         const chunk = (delta, reason = null) => `data: ${JSON.stringify({id, object:'chat.completion.chunk', created, model, choices:[{index:0, delta, finish_reason:reason}]})}\n\n`;
         if (b.stream === true) {
           let closed = false, sent = 0;
